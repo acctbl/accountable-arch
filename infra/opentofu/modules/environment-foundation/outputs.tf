@@ -10,6 +10,10 @@ output "image_repository_arn" {
   value = aws_ecr_repository.application.arn
 }
 
+output "image_repository_name" {
+  value = aws_ecr_repository.application.name
+}
+
 output "image_repository_url" {
   value = aws_ecr_repository.application.repository_url
 }

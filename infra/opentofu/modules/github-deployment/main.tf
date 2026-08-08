@@ -69,8 +69,9 @@ locals {
     "arn:aws:iam::${var.account_id}:policy/accountable-${var.environment}-edge",
     "arn:aws:iam::${var.account_id}:policy/accountable-${var.environment}-foundation",
     "arn:aws:iam::aws:policy/ReadOnlyAccess",
+    "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup",
   ]
-  pass_role_services = ["ecs-tasks.amazonaws.com"]
+  pass_role_services = ["backup.amazonaws.com", "ecs-tasks.amazonaws.com"]
 }
 
 resource "aws_iam_openid_connect_provider" "github" {
@@ -258,6 +259,33 @@ data "aws_iam_policy_document" "apply_cell" {
       "ecs:UntagResource",
       "ecs:UpdateClusterSettings",
       "ecs:UpdateService",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.region]
+    }
+  }
+
+  statement {
+    sid = "ManageCellBackups"
+    actions = [
+      "backup:CreateBackupPlan",
+      "backup:CreateBackupSelection",
+      "backup:CreateBackupVault",
+      "backup:DeleteBackupPlan",
+      "backup:DeleteBackupSelection",
+      "backup:DeleteBackupVault",
+      "backup:DescribeBackupVault",
+      "backup:GetBackupPlan",
+      "backup:GetBackupSelection",
+      "backup:ListBackupSelections",
+      "backup:ListTags",
+      "backup:TagResource",
+      "backup:UntagResource",
+      "backup:UpdateBackupPlan",
     ]
     resources = ["*"]
 

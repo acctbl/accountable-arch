@@ -121,6 +121,11 @@ run "private_runtime_is_fail_closed" {
   }
 
   assert {
+    condition     = length(aws_backup_plan.cell) == 0 && length(aws_backup_vault.cell) == 0
+    error_message = "An ephemeral cell must not create a backup vault it would leave behind."
+  }
+
+  assert {
     condition     = aws_lb.api.internal && !aws_lb.api.enable_deletion_protection
     error_message = "The ephemeral API load balancer must be internal and remain destroyable after the proof window."
   }
@@ -393,6 +398,16 @@ run "durable_cell_keeps_recovery_and_deletion_safeguards" {
       !aws_s3_bucket.web.force_destroy
     )
     error_message = "Durable cells must protect the ALB from deletion and must never erase bucket contents during destroy."
+  }
+
+  assert {
+    condition = (
+      one(aws_backup_plan.cell[0].rule).schedule == "cron(0 3 1 * ? *)" &&
+      one(one(aws_backup_plan.cell[0].rule).lifecycle).delete_after == 365 &&
+      one(aws_backup_selection.cell[0].resources) == aws_db_instance.cell.arn &&
+      aws_backup_vault.cell[0].kms_key_arn == aws_kms_key.cell.arn
+    )
+    error_message = "Durable cells must take monthly database backups into the cell-encrypted vault and keep them for a year."
   }
 }
 

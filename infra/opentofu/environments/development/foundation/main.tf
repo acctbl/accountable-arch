@@ -40,3 +40,19 @@ module "environment" {
   github_oidc_subject_prefix = "repo:acctbl@309473689/accountable@1318144297"
   region                     = "eu-west-2"
 }
+
+resource "aws_ecr_replication_configuration" "recovery" {
+  replication_configuration {
+    rule {
+      destination {
+        region      = "eu-west-2"
+        registry_id = "063280428550"
+      }
+
+      repository_filter {
+        filter      = module.environment.image_repository_name
+        filter_type = "PREFIX_MATCH"
+      }
+    }
+  }
+}

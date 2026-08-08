@@ -38,3 +38,21 @@ module "account" {
   account_id  = "063280428550"
   environment = "security-backup"
 }
+
+data "aws_iam_policy_document" "image_recovery" {
+  statement {
+    sid     = "ReplicateDevelopmentImages"
+    actions = ["ecr:CreateRepository", "ecr:ReplicateImage"]
+
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::453722413624:root"]
+    }
+
+    resources = ["arn:aws:ecr:eu-west-2:063280428550:repository/accountable"]
+  }
+}
+
+resource "aws_ecr_registry_policy" "image_recovery" {
+  policy = data.aws_iam_policy_document.image_recovery.json
+}
