@@ -134,6 +134,13 @@ resource "aws_cloudfront_response_headers_policy" "documents" {
   }
 
   security_headers_config {
+    # A static header cannot contain a nonce. The hash pins the inline script.
+    # apps/web/src/i18n/bootstrap.test.ts fails if that script changes.
+    content_security_policy {
+      override                = true
+      content_security_policy = trimspace(file("${path.module}/content-security-policy.txt"))
+    }
+
     content_type_options {
       override = true
     }
@@ -356,6 +363,10 @@ resource "aws_cloudfront_distribution" "cell" {
     }
   }
 
+  # The default certificate allows no other field in this block.
+  # AWS sets the security policy to TLSv1 and removes a stronger value.
+  # A stronger value therefore causes a permanent plan difference.
+  # TLS 1.2 needs a custom hostname and an ACM certificate in us-east-1.
   viewer_certificate {
     cloudfront_default_certificate = true
   }

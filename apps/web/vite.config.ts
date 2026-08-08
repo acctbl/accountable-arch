@@ -6,6 +6,11 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 
 import viteReact from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
+import {
+	cacheControl,
+	contentSecurityPolicy,
+	withConnectSource,
+} from "./edge-contract";
 import { localeBootstrapScript } from "./src/i18n/bootstrap";
 
 function localeBootstrap(includePseudoLocales: boolean): Plugin {
@@ -23,12 +28,6 @@ function localeBootstrap(includePseudoLocales: boolean): Plugin {
 	};
 }
 
-const edgeCacheControl = {
-	runtimeConfig: "no-store",
-	hashedAsset: "public, max-age=31536000, immutable",
-	document: "no-cache",
-};
-
 function runtimeConfigBody(): string {
 	const apiBaseURL =
 		process.env.ACCOUNTABLE_RUNTIME_API_BASE_URL ?? "http://localhost:8080";
@@ -45,17 +44,21 @@ function runtimeConfigBody(): string {
 	});
 }
 
-// Local and CI simulation of the production edge in infra/opentofu: CloudFront
-// serves the built release from private S3 and owns these cache headers, and
-// the runtime config is a deploy artifact written by cmd/webconfig. Nothing in
-// this plugin runs in production.
+function previewContentSecurityPolicy(): string {
+	const apiBaseURL = process.env.ACCOUNTABLE_RUNTIME_API_BASE_URL;
+	if (!apiBaseURL) {
+		return contentSecurityPolicy;
+	}
+	return withConnectSource(contentSecurityPolicy, new URL(apiBaseURL).origin);
+}
+
 function edgeContractSimulator(): Plugin {
 	const serveConfig = (
 		_request: unknown,
 		response: import("node:http").ServerResponse,
 	) => {
 		response.statusCode = 200;
-		response.setHeader("Cache-Control", edgeCacheControl.runtimeConfig);
+		response.setHeader("Cache-Control", cacheControl.runtimeConfig);
 		response.setHeader("Content-Type", "application/json; charset=utf-8");
 		response.end(runtimeConfigBody());
 	};
@@ -68,12 +71,17 @@ function edgeContractSimulator(): Plugin {
 			server.middlewares.use("/_runtime/config.json", serveConfig);
 			server.middlewares.use((request, response, next) => {
 				const path = (request.url ?? "").split("?")[0] ?? "";
+				const hashedAsset = path.startsWith("/assets/");
 				response.setHeader(
 					"Cache-Control",
-					path.startsWith("/assets/")
-						? edgeCacheControl.hashedAsset
-						: edgeCacheControl.document,
+					hashedAsset ? cacheControl.hashedAsset : cacheControl.document,
 				);
+				if (!hashedAsset) {
+					response.setHeader(
+						"Content-Security-Policy",
+						previewContentSecurityPolicy(),
+					);
+				}
 				next();
 			});
 		},

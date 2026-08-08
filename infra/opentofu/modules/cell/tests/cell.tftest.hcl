@@ -251,6 +251,49 @@ run "tasks_use_tmpfs_runtime_scratch" {
   }
 }
 
+run "documents_carry_the_security_headers" {
+  command = plan
+
+  providers = {
+    aws        = aws.regional
+    aws.global = aws.global
+  }
+
+  assert {
+    condition = alltrue([
+      for config in aws_cloudfront_response_headers_policy.documents.security_headers_config : (
+        config.content_type_options[0].override &&
+        config.frame_options[0].frame_option == "DENY" &&
+        config.strict_transport_security[0].include_subdomains &&
+        config.strict_transport_security[0].preload &&
+        config.referrer_policy[0].referrer_policy == "strict-origin-when-cross-origin"
+      )
+    ])
+    error_message = "Documents must carry the frame, referrer, content-type, and transport security headers."
+  }
+
+  assert {
+    condition = alltrue([
+      for config in aws_cloudfront_response_headers_policy.documents.security_headers_config : alltrue([
+        for directive in ["default-src 'self'", "object-src 'none'", "base-uri 'none'", "frame-ancestors 'none'"] :
+        contains(split("; ", config.content_security_policy[0].content_security_policy), directive)
+      ]) && config.content_security_policy[0].override
+    ])
+    error_message = "Documents must deny by default and deny the sources an application never needs."
+  }
+
+  assert {
+    condition = alltrue([
+      for config in aws_cloudfront_response_headers_policy.documents.security_headers_config :
+      can(regex("^script-src 'self' 'sha256-[A-Za-z0-9+/=]+'$", one([
+        for directive in split("; ", config.content_security_policy[0].content_security_policy) :
+        directive if startswith(directive, "script-src ")
+      ])))
+    ])
+    error_message = "The script-src directive must pin the inline script by hash and allow no other source."
+  }
+}
+
 run "only_bootstrap_uses_the_secret_execution_role" {
   command = plan
 

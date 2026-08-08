@@ -1,12 +1,13 @@
+import { createHash } from "node:crypto";
+
 import { expect, test } from "@playwright/test";
 
-// The preview stack simulates the CloudFront contract defined in
-// infra/opentofu/web.tf; these assertions pin that contract in CI.
-const cacheControl = {
-	runtimeConfig: "no-store",
-	hashedAsset: "public, max-age=31536000, immutable",
-	document: "no-cache",
-} as const;
+import {
+	cacheControl,
+	contentSecurityPolicy,
+	withConnectSource,
+} from "../../apps/web/edge-contract";
+import { localeBootstrapScript } from "../../apps/web/src/i18n/bootstrap";
 
 test("serves the runtime config artifact uncached with the strict schema", async ({
 	request,
@@ -49,4 +50,35 @@ test("serves hashed assets as immutable", async ({ request }) => {
 	const asset = await request.get(assetPath);
 	expect(asset.status()).toBe(200);
 	expect(asset.headers()["cache-control"]).toBe(cacheControl.hashedAsset);
+});
+
+test("serves documents with the edge content security policy", async ({
+	request,
+}) => {
+	const runtimeConfig = await (
+		await request.get("/_runtime/config.json")
+	).json();
+	const expected = withConnectSource(
+		contentSecurityPolicy,
+		new URL(runtimeConfig.api_base_url).origin,
+	);
+
+	const document = await request.get("/");
+	expect(document.status()).toBe(200);
+	expect(document.headers()["content-security-policy"]).toBe(expected);
+});
+
+test("pins the script that vite injects into the document", async ({
+	request,
+}) => {
+	const digest = createHash("sha256")
+		.update(localeBootstrapScript(false))
+		.digest("base64");
+
+	const document = await request.get("/");
+	const scriptSource = (document.headers()["content-security-policy"] ?? "")
+		.split("; ")
+		.find((directive) => directive.startsWith("script-src "));
+
+	expect(scriptSource).toBe(`script-src 'self' 'sha256-${digest}'`);
 });
