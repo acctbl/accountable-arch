@@ -9,7 +9,7 @@ import { defineConfig, type Plugin } from "vite";
 import {
 	cacheControl,
 	contentSecurityPolicy,
-	withConnectSource,
+	documentContentSecurityPolicy,
 } from "./edge-contract";
 import { localeBootstrapScript } from "./src/i18n/bootstrap";
 
@@ -44,12 +44,12 @@ function runtimeConfigBody(): string {
 	});
 }
 
-function previewContentSecurityPolicy(): string {
-	const apiBaseURL = process.env.ACCOUNTABLE_RUNTIME_API_BASE_URL;
-	if (!apiBaseURL) {
-		return contentSecurityPolicy;
-	}
-	return withConnectSource(contentSecurityPolicy, new URL(apiBaseURL).origin);
+function previewContentSecurityPolicy(documentOrigin: string): string {
+	return documentContentSecurityPolicy(
+		contentSecurityPolicy,
+		process.env.ACCOUNTABLE_RUNTIME_API_BASE_URL,
+		documentOrigin,
+	);
 }
 
 function edgeContractSimulator(): Plugin {
@@ -77,9 +77,15 @@ function edgeContractSimulator(): Plugin {
 					hashedAsset ? cacheControl.hashedAsset : cacheControl.document,
 				);
 				if (!hashedAsset) {
+					const host = request.headers.host ?? "127.0.0.1";
+					const scheme =
+						process.env.ACCOUNTABLE_TLS_KEY_FILE &&
+						process.env.ACCOUNTABLE_TLS_CERT_FILE
+							? "https"
+							: "http";
 					response.setHeader(
 						"Content-Security-Policy",
-						previewContentSecurityPolicy(),
+						previewContentSecurityPolicy(new URL(`${scheme}://${host}`).origin),
 					);
 				}
 				next();

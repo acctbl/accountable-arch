@@ -5,7 +5,7 @@ import { expect, test } from "@playwright/test";
 import {
 	cacheControl,
 	contentSecurityPolicy,
-	withConnectSource,
+	documentContentSecurityPolicy,
 } from "../../apps/web/edge-contract";
 import { localeBootstrapScript } from "../../apps/web/src/i18n/bootstrap";
 
@@ -58,12 +58,13 @@ test("serves documents with the edge content security policy", async ({
 	const runtimeConfig = await (
 		await request.get("/_runtime/config.json")
 	).json();
-	const expected = withConnectSource(
+	const document = await request.get("/");
+	const expected = documentContentSecurityPolicy(
 		contentSecurityPolicy,
-		new URL(runtimeConfig.api_base_url).origin,
+		runtimeConfig.api_base_url,
+		new URL(document.url()).origin,
 	);
 
-	const document = await request.get("/");
 	expect(document.status()).toBe(200);
 	expect(document.headers()["content-security-policy"]).toBe(expected);
 });

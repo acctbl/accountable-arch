@@ -24,3 +24,18 @@ export function withConnectSource(policy: string, source: string): string {
 		)
 		.join("; ");
 }
+
+export function documentContentSecurityPolicy(
+	policy: string,
+	apiBaseURL: string | undefined,
+	documentOrigin: string,
+): string {
+	if (!apiBaseURL) {
+		return policy;
+	}
+	const apiOrigin = new URL(apiBaseURL).origin;
+	if (apiOrigin === documentOrigin) {
+		return policy;
+	}
+	return withConnectSource(policy, apiOrigin);
+}
