@@ -30,11 +30,11 @@ function localeBootstrap(includePseudoLocales: boolean): Plugin {
 
 function runtimeConfigBody(): string {
 	const apiBaseURL =
-		process.env.ACCOUNTABLE_RUNTIME_API_BASE_URL ?? "http://localhost:8080";
+		process.env["ACCOUNTABLE_RUNTIME_API_BASE_URL"] ?? "http://localhost:8080";
 	const architectureProbe =
-		process.env.ACCOUNTABLE_RUNTIME_ARCHITECTURE_PROBE === "true";
+		process.env["ACCOUNTABLE_RUNTIME_ARCHITECTURE_PROBE"] === "true";
 	const configurationRevision =
-		process.env.ACCOUNTABLE_RUNTIME_CONFIGURATION_REVISION ??
+		process.env["ACCOUNTABLE_RUNTIME_CONFIGURATION_REVISION"] ??
 		"local-development";
 	return JSON.stringify({
 		schema_version: 1,
@@ -47,7 +47,7 @@ function runtimeConfigBody(): string {
 function previewContentSecurityPolicy(documentOrigin: string): string {
 	return documentContentSecurityPolicy(
 		contentSecurityPolicy,
-		process.env.ACCOUNTABLE_RUNTIME_API_BASE_URL,
+		process.env["ACCOUNTABLE_RUNTIME_API_BASE_URL"],
 		documentOrigin,
 	);
 }
@@ -79,8 +79,8 @@ function edgeContractSimulator(): Plugin {
 				if (!hashedAsset) {
 					const host = request.headers.host ?? "127.0.0.1";
 					const scheme =
-						process.env.ACCOUNTABLE_TLS_KEY_FILE &&
-						process.env.ACCOUNTABLE_TLS_CERT_FILE
+						process.env["ACCOUNTABLE_TLS_KEY_FILE"] &&
+						process.env["ACCOUNTABLE_TLS_CERT_FILE"]
 							? "https"
 							: "http";
 					response.setHeader(
@@ -95,8 +95,8 @@ function edgeContractSimulator(): Plugin {
 }
 
 function previewHTTPS(): { key: Buffer; cert: Buffer } | undefined {
-	const keyPath = process.env.ACCOUNTABLE_TLS_KEY_FILE;
-	const certPath = process.env.ACCOUNTABLE_TLS_CERT_FILE;
+	const keyPath = process.env["ACCOUNTABLE_TLS_KEY_FILE"];
+	const certPath = process.env["ACCOUNTABLE_TLS_CERT_FILE"];
 	if (!keyPath || !certPath) {
 		return undefined;
 	}
@@ -120,10 +120,10 @@ const config = defineConfig(({ command }) => {
 			},
 		},
 		preview: {
-			host: process.env.ACCOUNTABLE_WEB_HOST ?? "127.0.0.1",
-			port: Number(process.env.ACCOUNTABLE_WEB_PORT ?? "4173"),
+			host: process.env["ACCOUNTABLE_WEB_HOST"] ?? "127.0.0.1",
+			port: Number(process.env["ACCOUNTABLE_WEB_PORT"] ?? "4173"),
 			strictPort: true,
-			https,
+			...(https ? { https } : {}),
 		},
 		plugins: [
 			edgeContractSimulator(),

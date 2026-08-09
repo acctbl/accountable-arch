@@ -8,6 +8,7 @@ import {
 	documentContentSecurityPolicy,
 } from "../../apps/web/edge-contract";
 import { localeBootstrapScript } from "../../apps/web/src/i18n/bootstrap";
+import { parseRuntimeConfig } from "../../apps/web/src/lib/runtime-config";
 
 test("serves the runtime config artifact uncached with the strict schema", async ({
 	request,
@@ -17,14 +18,9 @@ test("serves the runtime config artifact uncached with the strict schema", async
 	expect(response.headers()["cache-control"]).toBe(cacheControl.runtimeConfig);
 	expect(response.headers()["content-type"]).toContain("application/json");
 
-	const body = await response.json();
-	expect(Object.keys(body).sort()).toEqual([
-		"api_base_url",
-		"architecture_probe",
-		"configuration_revision",
-		"schema_version",
-	]);
-	expect(body.schema_version).toBe(1);
+	expect(parseRuntimeConfig(await response.json())).toMatchObject({
+		schema_version: 1,
+	});
 });
 
 test("serves documents and deep links as revalidated SPA fallbacks", async ({
@@ -55,9 +51,9 @@ test("serves hashed assets as immutable", async ({ request }) => {
 test("serves documents with the edge content security policy", async ({
 	request,
 }) => {
-	const runtimeConfig = await (
-		await request.get("/_runtime/config.json")
-	).json();
+	const runtimeConfig = parseRuntimeConfig(
+		await (await request.get("/_runtime/config.json")).json(),
+	);
 	const document = await request.get("/");
 	const expected = documentContentSecurityPolicy(
 		contentSecurityPolicy,

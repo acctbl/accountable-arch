@@ -34,7 +34,8 @@
     "@tanstack/react-router": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "react-intl": "catalog:"
+    "react-intl": "catalog:",
+    "valibot": "^1.4.2"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",

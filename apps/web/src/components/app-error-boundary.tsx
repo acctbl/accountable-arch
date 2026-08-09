@@ -7,17 +7,17 @@ export class AppErrorBoundary extends React.Component<
 	{ children: React.ReactNode },
 	State
 > {
-	state: State = { failed: false };
+	override state: State = { failed: false };
 
 	static getDerivedStateFromError(): State {
 		return { failed: true };
 	}
 
-	componentDidCatch(error: unknown) {
+	override componentDidCatch(error: unknown) {
 		console.error("Application boundary caught an error", error);
 	}
 
-	render() {
+	override render() {
 		if (this.state.failed) {
 			return (
 				<main id="main-content">

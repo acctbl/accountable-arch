@@ -23,11 +23,10 @@ export async function mergeCatalogs<T>(
 ): Promise<Record<string, T>> {
 	const merged: Record<string, T> = { ...base };
 	const catalogs = await Promise.all(
-		localeChainLeastToMostSpecific(locale).map((tag) => {
-			const loadCatalog = loaders[catalogPath(tag)];
-
-			return loadCatalog?.() ?? {};
-		}),
+		localeChainLeastToMostSpecific(locale)
+			.map((tag) => loaders[catalogPath(tag)])
+			.filter((loadCatalog) => loadCatalog !== undefined)
+			.map((loadCatalog) => loadCatalog()),
 	);
 
 	for (const catalog of catalogs) {

@@ -44,8 +44,28 @@
     "typescript/no-misused-promises": "error",
     "typescript/await-thenable": "error",
     "typescript/require-await": "error",
+    "no-promise-executor-return": "error",
     "typescript/only-throw-error": "error",
     "typescript/switch-exhaustiveness-check": "error",
+    "typescript/no-restricted-types": [
+      "error",
+      {
+        "types": {
+          "Record<string, unknown>": "Prefer a concrete object shape, or unknown plus narrowing."
+        }
+      }
+    ],
+    "no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          {
+            "name": "valibot",
+            "message": "Import valibot only in boundary modules that parse untrusted input."
+          }
+        ]
+      }
+    ],
 
     "react/jsx-no-literals": [
       "error",
@@ -76,5 +96,11 @@
     "tailwindcss/no-deprecated-classes": "error",
     "tailwindcss/enforce-logical": ["error", { "direction": "inline" }],
     "tailwindcss/enforce-sort-order": "error"
-  }
+  },
+  "overrides": [
+    {
+      "files": ["**/*.schema.ts", "apps/web/src/lib/runtime-config.ts"],
+      "rules": { "no-restricted-imports": "off" }
+    }
+  ]
 }
