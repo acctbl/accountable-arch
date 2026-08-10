@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "release_id": "018f47d2-7f00-7abc-9def-1234567890ab",
+  "created_at": "2026-08-10T10:00:00Z",
+  "commit_sha": "0123456789abcdef0123456789abcdef01234567",
+  "artifacts": [
+    {
+      "name": "api_oci",
+      "type": "oci_image",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "immutable_uri": "oci://registry.example/accountable-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "name": "collector_oci",
+      "type": "oci_image",
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "immutable_uri": "oci://registry.example/accountable-collector@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "name": "web_assets",
+      "type": "web_assets",
+      "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "immutable_uri": "s3://accountable-artifacts/web/sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.tar"
+    }
+  ]
+}

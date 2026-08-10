@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "files": [
+    {
+      "path": "_brand/mark.txt",
+      "size": 12,
+      "digest": "sha256:e4c5a2f2c481e0ba2e6dd718d6f5a2c89697bd9577c8060d24ecb744b9b770fb"
+    },
+    {
+      "path": "_runtime/extra.txt",
+      "size": 9,
+      "digest": "sha256:90b82580a0ea516e3021fbd5ccfd4775012eb9c729a26aa2167d75b4ec887c5f"
+    },
+    {
+      "path": "assets/app.js",
+      "size": 28,
+      "digest": "sha256:6ba960208dc5c9aefbe02b522f23fbffda4db993355118972be00dcfc7fe5513"
+    },
+    {
+      "path": "index.html",
+      "size": 42,
+      "digest": "sha256:c8e6c358f028bd11243971a1cd259ad8c477988262f81edce47e55e048f9a9d7"
+    }
+  ]
+}

@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "sampling_algorithm": "sha256_u32_be_v1",
+  "client_applications": ["web"],
+  "client_artifact_types": ["web_assets"],
+  "route_classes": ["home"],
+  "events": [
+    {
+      "name": "app.ready",
+      "sample_basis_points": 1000,
+      "emission_group": "app.ready",
+      "document_limit": 1,
+      "attributes": {
+        "duration_ms": {"type": "integer", "minimum": 0, "maximum": 600000}
+      },
+      "required_attributes": ["duration_ms"]
+    },
+    {
+      "name": "app.error",
+      "sample_basis_points": 10000,
+      "emission_group": "app.error",
+      "document_limit": 5,
+      "attributes": {
+        "error_category": {
+          "type": "string",
+          "values": ["promise_rejection", "resource_error", "script_error", "unknown"]
+        }
+      },
+      "required_attributes": ["error_category"]
+    },
+    {
+      "name": "route.navigation",
+      "sample_basis_points": 1000,
+      "emission_group": "sampled_navigation_and_api",
+      "document_limit": 200,
+      "attributes": {
+        "duration_ms": {"type": "integer", "minimum": 0, "maximum": 600000}
+      },
+      "required_attributes": ["duration_ms"]
+    },
+    {
+      "name": "api.request.completed",
+      "sample_basis_points": 1000,
+      "emission_group": "sampled_navigation_and_api",
+      "document_limit": 200,
+      "attributes": {
+        "rpc_service": {"type": "string", "values": ["accountable.system.v1.SystemService"]},
+        "rpc_method": {"type": "string", "values": ["GetRuntime"]},
+        "status_class": {"type": "string", "values": ["2xx", "4xx", "5xx", "network"]},
+        "outcome": {"type": "string", "values": ["success", "failure"]},
+        "error_category": {
+          "type": "string",
+          "values": ["client", "network", "none", "server", "timeout", "unknown"]
+        },
+        "duration_ms": {"type": "integer", "minimum": 0, "maximum": 600000}
+      },
+      "required_attributes": [
+        "rpc_service",
+        "rpc_method",
+        "status_class",
+        "outcome",
+        "error_category",
+        "duration_ms"
+      ]
+    },
+    {
+      "name": "api.request.failed",
+      "sample_basis_points": 10000,
+      "emission_group": "api.request.failed",
+      "document_limit": 20,
+      "attributes": {
+        "rpc_service": {"type": "string", "values": ["accountable.system.v1.SystemService"]},
+        "rpc_method": {"type": "string", "values": ["GetRuntime"]},
+        "error_category": {
+          "type": "string",
+          "values": ["network", "server", "timeout", "unknown"]
+        }
+      },
+      "required_attributes": ["rpc_service", "rpc_method", "error_category"]
+    },
+    {
+      "name": "web_vital.lcp",
+      "sample_basis_points": 1000,
+      "emission_group": "web_vital.lcp",
+      "document_limit": 1,
+      "attributes": {
+        "value": {"type": "number", "minimum": 0, "maximum": 3600000}
+      },
+      "required_attributes": ["value"]
+    },
+    {
+      "name": "web_vital.inp",
+      "sample_basis_points": 1000,
+      "emission_group": "web_vital.inp",
+      "document_limit": 1,
+      "attributes": {
+        "value": {"type": "number", "minimum": 0, "maximum": 3600000}
+      },
+      "required_attributes": ["value"]
+    },
+    {
+      "name": "web_vital.cls",
+      "sample_basis_points": 1000,
+      "emission_group": "web_vital.cls",
+      "document_limit": 1,
+      "attributes": {
+        "value": {"type": "number", "minimum": 0, "maximum": 1000}
+      },
+      "required_attributes": ["value"]
+    }
+  ]
+}

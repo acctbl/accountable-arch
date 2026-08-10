@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "environment": "staging",
+  "cell_id": "stg-a",
+  "state": "active",
+  "effective_at": "2026-08-10T10:00:00Z",
+  "deployment_id": "018f47d2-7f00-7abc-8def-1234567890ab"
+}

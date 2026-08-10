@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "owner": "platform",
+  "severity": "warning",
+  "action": "warning",
+  "scope": "environment",
+  "signal": "grafana.canary.failed",
+  "environment": "staging",
+  "cell_id": "fake-cell",
+  "summary": "Grafana health proof failed",
+  "runbook_url": "https://runbooks.example/observability/grafana-canary",
+  "recovery_signal": "canary succeeds twice",
+  "dashboard_url": "https://grafana.example/d/health",
+  "identity_url": "https://grafana.example/d/identities"
+}

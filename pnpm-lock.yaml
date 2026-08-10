@@ -60,6 +60,9 @@ catalogs:
     typescript:
       specifier: 7.0.2
       version: 7.0.2
+    valibot:
+      specifier: 1.4.2
+      version: 1.4.2
     vite:
       specifier: ^8.1.5
       version: 8.1.5
@@ -80,6 +83,10 @@ overrides:
 importers:
 
   .:
+    dependencies:
+      valibot:
+        specifier: 'catalog:'
+        version: 1.4.2(typescript@7.0.2)
     devDependencies:
       '@axe-core/playwright':
         specifier: 4.11.1
@@ -139,7 +146,7 @@ importers:
         specifier: 'catalog:'
         version: 10.1.18(@types/react@19.2.17)(react@19.2.8)
       valibot:
-        specifier: ^1.4.2
+        specifier: 'catalog:'
         version: 1.4.2(typescript@7.0.2)
     devDependencies:
       '@biomejs/biome':
@@ -196,6 +203,25 @@ importers:
       vite:
         specifier: 'catalog:'
         version: 8.1.5(@types/node@26.1.1)(jiti@2.7.0)
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.10(@types/node@26.1.1)(happy-dom@20.11.1)(vite@8.1.5(@types/node@26.1.1)(jiti@2.7.0))
+
+  packages/client-telemetry:
+    dependencies:
+      valibot:
+        specifier: 'catalog:'
+        version: 1.4.2(typescript@7.0.2)
+    devDependencies:
+      '@biomejs/biome':
+        specifier: 'catalog:'
+        version: 2.5.5
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.1.1
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
       vitest:
         specifier: 'catalog:'
         version: 4.1.10(@types/node@26.1.1)(happy-dom@20.11.1)(vite@8.1.5(@types/node@26.1.1)(jiti@2.7.0))

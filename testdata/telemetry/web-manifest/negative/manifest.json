@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "files": [
+    {
+      "path": "_runtime/config.json",
+      "size": 1,
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ]
+}

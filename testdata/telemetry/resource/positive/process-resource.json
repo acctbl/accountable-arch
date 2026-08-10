@@ -1,0 +1,14 @@
+{
+  "service.name": "accountable-api",
+  "service.version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "deployment.environment.name": "development",
+  "accountable.cell.id": "dev-a",
+  "accountable.runtime.role": "api",
+  "accountable.release.id": "018f47d2-7f00-7abc-9def-1234567890ab",
+  "accountable.configuration.schema_version": 1,
+  "accountable.configuration.revision": "development-v1",
+  "accountable.configuration.fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "accountable.telemetry.protocol": "otlp_http",
+  "accountable.telemetry.sampling.policy": "parent_based_5pct_v1",
+  "accountable.telemetry.redaction.policy.version": "allowlist_v1"
+}

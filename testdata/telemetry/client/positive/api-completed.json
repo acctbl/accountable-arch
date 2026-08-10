@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "client_application": "web",
+  "event_name": "api.request.completed",
+  "occurred_at": "2026-08-10T10:00:00.000Z",
+  "correlation_id": "018f47d2-7f00-7abc-8def-1234567890ab",
+  "route_class": "home",
+  "release_id": "018f47d2-7f00-7abc-9def-1234567890ab",
+  "client_artifact_type": "web_assets",
+  "client_artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "configuration_schema_version": 1,
+  "configuration_revision": "development-v1",
+  "configuration_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "attributes": {
+    "rpc_service": "accountable.system.v1.SystemService",
+    "rpc_method": "GetRuntime",
+    "status_class": "5xx",
+    "outcome": "failure",
+    "error_category": "server",
+    "duration_ms": 250
+  }
+}

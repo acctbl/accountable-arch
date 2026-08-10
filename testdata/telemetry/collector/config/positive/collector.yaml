@@ -1,0 +1,72 @@
+extensions:
+  bearertokenauth/grafana:
+    filename: /run/accountable/grafana-token
+receivers:
+  otlp/app:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+  otlp/slo:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4319
+  prometheus/internal:
+    config:
+      scrape_configs:
+        - job_name: collector
+          static_configs:
+            - targets: ["127.0.0.1:8888"]
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 15
+  batch:
+exporters:
+  accountable_delivery/grafana:
+    endpoint: https://otlp-gateway.example/otlp
+    auth:
+      authenticator: bearertokenauth/grafana
+    environment: development
+    cell_id: dev-a
+    collector_task_id: 0123456789abcdef0123456789abcdef
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 60s
+    sending_queue:
+      enabled: true
+      sizer: items
+      queue_size: 10000
+  awsemf/slo:
+    namespace: Accountable/SLO
+    dimension_rollup_option: NoDimensionRollup
+    sending_queue:
+      enabled: false
+    retry_on_failure:
+      enabled: false
+  awsemf/internal:
+    namespace: Accountable/Collector
+    dimension_rollup_option: NoDimensionRollup
+service:
+  extensions: [bearertokenauth/grafana]
+  pipelines:
+    traces/app:
+      receivers: [otlp/app]
+      processors: [memory_limiter, batch]
+      exporters: [accountable_delivery/grafana]
+    metrics/app:
+      receivers: [otlp/app]
+      processors: [memory_limiter, batch]
+      exporters: [accountable_delivery/grafana]
+    logs/app:
+      receivers: [otlp/app]
+      processors: [memory_limiter, batch]
+      exporters: [accountable_delivery/grafana]
+    metrics/slo:
+      receivers: [otlp/slo]
+      processors: [memory_limiter]
+      exporters: [awsemf/slo]
+    metrics/internal:
+      receivers: [prometheus/internal]
+      processors: [memory_limiter, batch]
+      exporters: [awsemf/internal]

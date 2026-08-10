@@ -1,0 +1,8 @@
+{
+  "accepted_item_count": 100,
+  "refused_item_count": 0,
+  "sent_item_count": 99,
+  "permanently_dropped_item_count": 0,
+  "pending_item_count": 1,
+  "oldest_pending_item_age_seconds": 30
+}

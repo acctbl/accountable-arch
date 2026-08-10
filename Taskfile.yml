@@ -39,6 +39,10 @@ tasks:
   generate:
     desc: Regenerate versioned code
     cmds:
+      - node scripts/generate-telemetry-contract.mjs
+      - >-
+        pnpm --filter @accountable/client-telemetry exec biome format --write
+        src/generated
       - buf generate
       - pnpm --filter @accountable/web generate-routes
 
@@ -80,7 +84,13 @@ tasks:
     cmds:
       - |
         set -euo pipefail
-        paths=(gen packages/proto/src apps/web/src/routeTree.gen.ts)
+        paths=(
+          gen
+          packages/proto/src
+          apps/web/src/routeTree.gen.ts
+          internal/platform/telemetry/client_contract_generated.go
+          packages/client-telemetry/src/generated/client-contract.schema.ts
+        )
         snapshot="$(mktemp -d "${TMPDIR:-/tmp}/accountable-gen-fresh.XXXXXX")"
         cleanup() { rm -rf "$snapshot"; }
         trap cleanup EXIT

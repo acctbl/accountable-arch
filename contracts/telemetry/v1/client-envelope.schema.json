@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://accountable.dev/contracts/telemetry/v1/client-envelope.schema.json",
+  "title": "Accountable client telemetry envelope version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "client_application",
+    "event_name",
+    "occurred_at",
+    "correlation_id",
+    "route_class",
+    "release_id",
+    "client_artifact_type",
+    "client_artifact_digest",
+    "configuration_schema_version",
+    "configuration_revision",
+    "configuration_fingerprint",
+    "attributes"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "client_application": {
+      "type": "string"
+    },
+    "event_name": {
+      "type": "string"
+    },
+    "occurred_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$"
+    },
+    "correlation_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "route_class": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]{0,63}$"
+    },
+    "release_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "client_artifact_type": {
+      "type": "string"
+    },
+    "client_artifact_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "configuration_schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "configuration_revision": {
+      "type": "string",
+      "pattern": "^[-A-Za-z0-9._]{1,128}$"
+    },
+    "configuration_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "attributes": {
+      "type": "object",
+      "maxProperties": 8,
+      "additionalProperties": {
+        "type": ["string", "integer", "number", "boolean"]
+      }
+    }
+  }
+}

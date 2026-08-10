@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "environment": "development",
+  "cell_id": "dev-a",
+  "collector_task_id": "0123456789abcdef0123456789abcdef",
+  "grafana_otlp_endpoint": "http://public.example/otlp",
+  "grafana_token_file": "/run/accountable/grafana-token",
+  "application_endpoint": "0.0.0.0:4318",
+  "sli_endpoint": "0.0.0.0:4319",
+  "internal_metrics_endpoint": "0.0.0.0:8888",
+  "protocol": "otlp_http",
+  "sampling_policy": "parent_based_5pct_v1",
+  "redaction_policy_version": "allowlist_v1"
+}

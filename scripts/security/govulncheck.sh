@@ -57,7 +57,8 @@ const exclude = new Set(
 const findings = new Set();
 for (const msg of jsonObjects(readFileSync(reportPath, "utf8"))) {
 	const id = msg.finding?.osv;
-	if (!id || exclude.has(id)) continue;
+	const reachesPackage = msg.finding?.trace?.some((frame) => frame.package);
+	if (!id || !reachesPackage || exclude.has(id)) continue;
 	findings.add(id);
 }
 
