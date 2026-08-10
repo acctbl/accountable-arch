@@ -28,7 +28,7 @@ func TestParseAcceptsExplicitManagedFoundation(t *testing.T) {
 		t.Fatalf("Parse: %v", err)
 	}
 	if config.Database.PasswordRef != "database-password" || config.Database.TLSMode != database.TLSVerifyFull ||
-		config.Secrets.Provider != secret.ProviderInfisical || config.Storage.Provider != storage.ProviderS3 ||
+		config.Secrets.Provider != secret.ProviderParameterStore || config.Storage.Provider != storage.ProviderS3 ||
 		config.Crypto.Provider != crypto.ProviderAWSKMS || config.Time.Provider != TimeProviderLinux ||
 		config.DeploymentMode != DeploymentModeManaged || config.Fingerprint != "fingerprint" ||
 		config.Revision != "reviewed-1" {
@@ -41,7 +41,6 @@ func TestParseAcceptsManagedDevelopmentFoundation(t *testing.T) {
 
 	raw := managedFileConfig()
 	raw.Environment = "development"
-	raw.Secrets.Environment = "development"
 	config, err := Parse("/etc/accountable/api.toml", "fingerprint", raw)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -74,13 +73,21 @@ func TestParseRefusesLocalDeploymentOutsideDevelopment(t *testing.T) {
 	}
 }
 
-func TestParseRefusesCrossEnvironmentSecretProject(t *testing.T) {
+func TestParseRefusesUnsafeParameterPaths(t *testing.T) {
 	t.Parallel()
 
-	raw := managedFileConfig()
-	raw.Secrets.Environment = "staging"
-	if _, err := Parse("/etc/accountable/api.toml", "fingerprint", raw); err == nil {
-		t.Fatal("Parse accepted a staging secret environment for production")
+	for name, value := range map[string]string{
+		"relative":   "accountable/cell-a/production/api",
+		"traversing": "/accountable/cell-a/../production/api",
+		"trailing":   "/accountable/cell-a/production/api/",
+		"root":       "/",
+		"empty":      "",
+	} {
+		raw := managedFileConfig()
+		raw.Secrets.ParameterPath = value
+		if _, err := Parse("/etc/accountable/api.toml", "fingerprint", raw); err == nil {
+			t.Errorf("%s: Parse accepted parameter_path %q", name, value)
+		}
 	}
 }
 
@@ -107,9 +114,9 @@ func TestParseRefusesAWSRegionMismatch(t *testing.T) {
 	t.Parallel()
 
 	for name, mutate := range map[string]func(*FileConfig){
-		"Infisical":      func(raw *FileConfig) { raw.Secrets.AWSRegion = "us-east-1" },
-		"object storage": func(raw *FileConfig) { raw.ObjectStorage.Region = "us-east-1" },
-		"KMS":            func(raw *FileConfig) { raw.KMS.Region = "us-east-1" },
+		"Parameter Store": func(raw *FileConfig) { raw.Secrets.AWSRegion = "us-east-1" },
+		"object storage":  func(raw *FileConfig) { raw.ObjectStorage.Region = "us-east-1" },
+		"KMS":             func(raw *FileConfig) { raw.KMS.Region = "us-east-1" },
 	} {
 		raw := managedFileConfig()
 		mutate(&raw)
@@ -126,9 +133,8 @@ func managedFileConfig() FileConfig {
 		AWSRegion: "eu-west-2", RuntimeRole: RuntimeRoleAPI, CheckTimeout: "30s", ReadinessProbeInterval: "10s",
 		Capabilities: completeCapabilities(false),
 		Secrets: &SecretsFileConfig{
-			Provider: secret.ProviderInfisical, SiteURL: "https://eu.infisical.com", AWSRegion: "eu-west-2",
-			ProjectID: "project-production", Environment: "production", SecretPath: "/api",
-			AuthMethod: secret.AuthAWSIAM, MachineIdentityID: "identity-production",
+			Provider: secret.ProviderParameterStore, AWSRegion: "eu-west-2",
+			ParameterPath: "/accountable/cell-a/production/api",
 		},
 		Postgres: &DatabaseFileConfig{
 			Host: "postgres.internal", Port: 5432, Name: "accountable", User: "accountable_login", Role: "accountable_api",

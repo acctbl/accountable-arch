@@ -121,7 +121,8 @@ resource "aws_vpc_security_group_ingress_rule" "bootstrap_to_database" {
   }
 }
 
-# Infisical Cloud and regional AWS APIs do not publish stable shared destination prefixes.
+# Regional AWS APIs do not publish stable shared destination prefixes. Closing this
+# rule requires interface endpoints for SSM, KMS, ECR, and CloudWatch Logs.
 #trivy:ignore:AVD-AWS-0104:exp:2026-11-05
 resource "aws_vpc_security_group_egress_rule" "runtime_https" {
   for_each = {
@@ -131,7 +132,7 @@ resource "aws_vpc_security_group_egress_rule" "runtime_https" {
   }
 
   cidr_ipv4         = "0.0.0.0/0"
-  description       = "TLS access to AWS services and Infisical EU"
+  description       = "TLS access to regional AWS APIs"
   from_port         = 443
   ip_protocol       = "tcp"
   security_group_id = each.value

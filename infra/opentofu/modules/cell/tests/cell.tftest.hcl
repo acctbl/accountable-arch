@@ -81,20 +81,16 @@ mock_provider "aws" {
 }
 
 variables {
-  account_id                    = "453722413624"
-  api_desired_count             = 1
-  api_machine_identity_id       = "identity-api"
-  availability_zones            = ["eu-west-2a", "eu-west-2b"]
-  bootstrap_machine_identity_id = "identity-bootstrap"
-  cell_id                       = "development-01"
-  configuration_revision        = "proof"
-  cell_lifecycle                = "ephemeral"
-  environment                   = "development"
-  image_repository_arn          = "arn:aws:ecr:eu-west-2:453722413624:repository/accountable"
-  image_uri                     = "453722413624.dkr.ecr.eu-west-2.amazonaws.com/accountable@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-  infisical_project_id          = "project-development"
-  migrate_machine_identity_id   = "identity-migrate"
-  vpc_cidr                      = "10.20.0.0/16"
+  account_id             = "453722413624"
+  api_desired_count      = 1
+  availability_zones     = ["eu-west-2a", "eu-west-2b"]
+  cell_id                = "development-01"
+  configuration_revision = "proof"
+  cell_lifecycle         = "ephemeral"
+  environment            = "development"
+  image_repository_arn   = "arn:aws:ecr:eu-west-2:453722413624:repository/accountable"
+  image_uri              = "453722413624.dkr.ecr.eu-west-2.amazonaws.com/accountable@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  vpc_cidr               = "10.20.0.0/16"
 }
 
 run "private_runtime_is_fail_closed" {
@@ -141,6 +137,48 @@ run "private_runtime_is_fail_closed" {
       rule.ip_protocol == "tcp" && rule.from_port == 443 && rule.to_port == 443
     ])
     error_message = "Public runtime egress must be restricted to TLS."
+  }
+
+  assert {
+    condition = alltrue([
+      for statement in data.aws_iam_policy_document.api.statement :
+      alltrue([for resource in statement.resources : !strcontains(resource, "/migrate/")])
+    ])
+    error_message = "The API role must not reach migration parameters."
+  }
+
+  assert {
+    condition = alltrue([
+      for statement in data.aws_iam_policy_document.migrate.statement :
+      alltrue([for resource in statement.resources : !strcontains(resource, "/api/")])
+    ])
+    error_message = "The migration role must not reach API parameters."
+  }
+
+  assert {
+    condition = alltrue([
+      for statement in concat(
+        data.aws_iam_policy_document.api.statement,
+        data.aws_iam_policy_document.migrate.statement,
+      ) : !contains(statement.actions, "ssm:PutParameter")
+    ])
+    error_message = "Only bootstrap may write runtime parameters."
+  }
+
+  assert {
+    condition = alltrue([
+      for statement in data.aws_iam_policy_document.bootstrap.statement :
+      alltrue([for resource in statement.resources : startswith(resource, local.parameter_arn_prefix) || resource == aws_kms_key.cell.arn])
+    ])
+    error_message = "Bootstrap parameter access must stay inside this cell's parameter root."
+  }
+
+  assert {
+    condition = anytrue([
+      for statement in data.aws_iam_policy_document.bootstrap.statement :
+      contains(statement.actions, "kms:Encrypt") && !contains(statement.actions, "kms:GenerateDataKey")
+    ])
+    error_message = "Bootstrap writes Standard-tier SecureString parameters, which need kms:Encrypt, not kms:GenerateDataKey."
   }
 }
 

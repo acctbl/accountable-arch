@@ -304,14 +304,9 @@ unary_rpc_timeout = "10s"
 stream_rpc_timeout = "25s"
 
 [secrets]
-provider = "infisical"
-site_url = "https://eu.infisical.com"
+provider = "aws_parameter_store"
 aws_region = "eu-west-2"
-project_id = "accountable"
-environment = "production"
-secret_path = "/api"
-auth_method = "aws_iam"
-machine_identity_id = "identity-api"
+parameter_path = "/accountable/cell-a/production/api"
 
 [postgres]
 host = "postgres.internal"

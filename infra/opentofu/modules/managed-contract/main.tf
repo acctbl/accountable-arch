@@ -9,6 +9,12 @@ locals {
     secure   = local.secure_bucket_name
     insecure = local.insecure_bucket_name
   }
+
+  # A fixture, not a credential: the contract proves the adapter returns these
+  # exact bytes through a SecureString read, so the value is deliberately public.
+  contract_parameter_path  = "/accountable/${var.environment}/contract"
+  contract_parameter_name  = "managed-contract-proof"
+  contract_parameter_value = "accountable-parameter-store-contract"
 }
 
 resource "aws_kms_key" "storage" {
@@ -152,7 +158,25 @@ resource "aws_iam_role" "contract" {
   max_session_duration = 3600
 }
 
+resource "aws_ssm_parameter" "contract" {
+  name   = "${local.contract_parameter_path}/${local.contract_parameter_name}"
+  type   = "SecureString"
+  key_id = aws_kms_key.storage.arn
+  value  = local.contract_parameter_value
+  tier   = "Standard"
+
+  tags = {
+    Purpose = "contract-secret"
+  }
+}
+
 data "aws_iam_policy_document" "contract" {
+  statement {
+    sid       = "ReadContractParameter"
+    actions   = ["ssm:GetParameters"]
+    resources = [aws_ssm_parameter.contract.arn]
+  }
+
   statement {
     sid = "InspectContractBuckets"
     actions = [

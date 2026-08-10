@@ -134,12 +134,8 @@ plan_args=(
 	-lock=false
 	-refresh=false
 	-var="api_desired_count=1"
-	-var="api_machine_identity_id=identity-api"
-	-var="bootstrap_machine_identity_id=identity-bootstrap"
 	-var="configuration_revision=negative-proof"
 	-var="image_uri=453722413624.dkr.ecr.eu-west-2.amazonaws.com/accountable@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	-var="infisical_project_id=project-development"
-	-var="migrate_machine_identity_id=identity-migrate"
 )
 
 save_plan() {

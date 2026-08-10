@@ -7,19 +7,15 @@ import (
 	"os"
 	"testing"
 	"time"
-
-	"github.com/acctbl/accountable/internal/platform/clock"
 )
 
-func TestInfisicalAWSContract(t *testing.T) {
+func TestParameterStoreAWSContract(t *testing.T) {
 	region := managedContractValue(t, "ACCOUNTABLE_MANAGED_CONTRACT_AWS_REGION")
-	projectID := managedContractValue(t, "ACCOUNTABLE_MANAGED_CONTRACT_INFISICAL_PROJECT_ID")
-	identityID := managedContractValue(t, "ACCOUNTABLE_MANAGED_CONTRACT_INFISICAL_MACHINE_IDENTITY_ID")
-	secretPath := managedContractValue(t, "ACCOUNTABLE_MANAGED_CONTRACT_INFISICAL_SECRET_PATH")
-	secretName := managedContractValue(t, "ACCOUNTABLE_MANAGED_CONTRACT_INFISICAL_SECRET_NAME")
-	wantDigest := managedContractValue(t, "ACCOUNTABLE_MANAGED_CONTRACT_INFISICAL_SECRET_SHA256")
+	parameterPath := managedContractValue(t, "ACCOUNTABLE_MANAGED_CONTRACT_PARAMETER_PATH")
+	secretName := managedContractValue(t, "ACCOUNTABLE_MANAGED_CONTRACT_PARAMETER_NAME")
+	wantDigest := managedContractValue(t, "ACCOUNTABLE_MANAGED_CONTRACT_PARAMETER_SHA256")
 	if decoded, err := hex.DecodeString(wantDigest); err != nil || len(decoded) != sha256.Size {
-		t.Fatal("ACCOUNTABLE_MANAGED_CONTRACT_INFISICAL_SECRET_SHA256 must be a SHA-256 hex digest")
+		t.Fatal("ACCOUNTABLE_MANAGED_CONTRACT_PARAMETER_SHA256 must be a SHA-256 hex digest")
 	}
 	ref, err := ParseRef(secretName)
 	if err != nil {
@@ -29,10 +25,8 @@ func TestInfisicalAWSContract(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	source, err := NewSource(ctx, Config{
-		Provider: ProviderInfisical, SiteURL: InfisicalCloudEUEndpoint, AWSRegion: region,
-		ProjectID: projectID, Environment: "development", SecretPath: secretPath,
-		AuthMethod: AuthAWSIAM, MachineIdentityID: identityID,
-	}, clock.System{})
+		Provider: ProviderParameterStore, AWSRegion: region, ParameterPath: parameterPath,
+	})
 	if err != nil {
 		t.Fatalf("NewSource: %v", err)
 	}

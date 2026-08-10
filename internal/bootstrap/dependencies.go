@@ -45,7 +45,7 @@ func Build(ctx context.Context, config Config) (*Dependencies, error) {
 	var resolver secret.SecretSource
 	var err error
 	if config.Capabilities.Secrets {
-		resolver, err = secret.NewSource(ctx, config.Secrets, timeSource)
+		resolver, err = secret.NewSource(ctx, config.Secrets)
 		if err != nil {
 			return nil, ErrFoundationUnavailable
 		}

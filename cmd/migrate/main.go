@@ -10,7 +10,6 @@ import (
 	"github.com/acctbl/accountable/internal/appconfig"
 	"github.com/acctbl/accountable/internal/bootstrap"
 	"github.com/acctbl/accountable/internal/migration"
-	"github.com/acctbl/accountable/internal/platform/clock"
 	"github.com/acctbl/accountable/internal/platform/database"
 	"github.com/acctbl/accountable/internal/platform/secret"
 )
@@ -37,7 +36,7 @@ func run(ctx context.Context, args []string) error {
 		config.Environment, config.DeploymentMode, config.CellID, config.RuntimeRole, config.Revision,
 		config.Fingerprint,
 	)
-	source, err := secret.NewSource(ctx, config.Secrets, clock.System{})
+	source, err := secret.NewSource(ctx, config.Secrets)
 	if err != nil {
 		return err
 	}

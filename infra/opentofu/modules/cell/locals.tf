@@ -17,5 +17,10 @@ locals {
   database_port = 5432
   data_bucket   = "${local.name}-${var.account_id}-data"
   web_bucket    = "${local.name}-${var.account_id}-web"
-  secret_root   = "/${var.cell_id}"
+
+  parameter_root = "/accountable/${var.cell_id}/${var.environment}"
+  parameter_arn_prefix = join("", [
+    "arn:aws:ssm:${data.aws_region.current.region}:${var.account_id}:parameter",
+    local.parameter_root,
+  ])
 }

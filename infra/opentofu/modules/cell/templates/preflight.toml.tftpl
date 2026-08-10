@@ -18,14 +18,9 @@ telemetry = false
 redpanda = false
 
 [secrets]
-provider = "infisical"
-site_url = "https://eu.infisical.com"
+provider = "aws_parameter_store"
 aws_region = "${aws_region}"
-project_id = "${infisical_project_id}"
-environment = "${environment}"
-secret_path = "${secret_path}"
-auth_method = "aws_iam"
-machine_identity_id = "${machine_identity_id}"
+parameter_path = "${parameter_path}"
 
 [postgres]
 host = "${database_host}"

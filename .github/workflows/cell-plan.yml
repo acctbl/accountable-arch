@@ -33,22 +33,6 @@ on:
         description: Immutable configuration revision
         required: true
         type: string
-      infisical_project_id:
-        description: Infisical development project ID
-        required: true
-        type: string
-      api_machine_identity_id:
-        description: Infisical API machine identity ID
-        required: true
-        type: string
-      migrate_machine_identity_id:
-        description: Infisical migration machine identity ID
-        required: true
-        type: string
-      bootstrap_machine_identity_id:
-        description: Infisical bootstrap machine identity ID
-        required: true
-        type: string
 
 permissions:
   actions: read
@@ -105,10 +89,6 @@ jobs:
           OPERATION: ${{ inputs.operation }}
           IMAGE_URI: ${{ inputs.image_uri }}
           REVISION: ${{ inputs.revision }}
-          INFISICAL_PROJECT_ID: ${{ inputs.infisical_project_id }}
-          API_MACHINE_IDENTITY_ID: ${{ inputs.api_machine_identity_id }}
-          MIGRATE_MACHINE_IDENTITY_ID: ${{ inputs.migrate_machine_identity_id }}
-          BOOTSTRAP_MACHINE_IDENTITY_ID: ${{ inputs.bootstrap_machine_identity_id }}
         run: |
           set -euo pipefail
           mise trust mise.toml
@@ -133,12 +113,8 @@ jobs:
             -out="$RUNNER_TEMP/cell.plan" \
             "${destroy_argument[@]}" \
             -var="api_desired_count=$desired_count" \
-            -var="api_machine_identity_id=$API_MACHINE_IDENTITY_ID" \
-            -var="bootstrap_machine_identity_id=$BOOTSTRAP_MACHINE_IDENTITY_ID" \
             -var="configuration_revision=$REVISION" \
-            -var="image_uri=$IMAGE_URI" \
-            -var="infisical_project_id=$INFISICAL_PROJECT_ID" \
-            -var="migrate_machine_identity_id=$MIGRATE_MACHINE_IDENTITY_ID"
+            -var="image_uri=$IMAGE_URI"
           plan_status=$?
           set -e
           if [[ "$plan_status" == "1" ]]; then exit 1; fi
@@ -200,22 +176,14 @@ jobs:
           OPERATION: ${{ inputs.operation }}
           IMAGE_URI: ${{ inputs.image_uri }}
           REVISION: ${{ inputs.revision }}
-          INFISICAL_PROJECT_ID: ${{ inputs.infisical_project_id }}
-          API_MACHINE_IDENTITY_ID: ${{ inputs.api_machine_identity_id }}
-          MIGRATE_MACHINE_IDENTITY_ID: ${{ inputs.migrate_machine_identity_id }}
-          BOOTSTRAP_MACHINE_IDENTITY_ID: ${{ inputs.bootstrap_machine_identity_id }}
         run: |
           set -euo pipefail
           mise trust mise.toml
           root="infra/opentofu/environments/development/cells/$CELL"
           cell_vars=(
             -var="api_desired_count=0"
-            -var="api_machine_identity_id=$API_MACHINE_IDENTITY_ID"
-            -var="bootstrap_machine_identity_id=$BOOTSTRAP_MACHINE_IDENTITY_ID"
             -var="configuration_revision=$REVISION"
             -var="image_uri=$IMAGE_URI"
-            -var="infisical_project_id=$INFISICAL_PROJECT_ID"
-            -var="migrate_machine_identity_id=$MIGRATE_MACHINE_IDENTITY_ID"
           )
           mise exec -- tofu -chdir="$root" init -input=false
           mise exec -- go run ./cmd/tofupolicy --account-id "$AWS_ACCOUNT_ID" --plan "$RUNNER_TEMP/cell-plan/cell-plan.json"

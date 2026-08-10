@@ -14,6 +14,8 @@ locals {
     "kms:Decrypt",
     "kms:DescribeKey",
   ]
+  parameter_read_actions  = ["ssm:GetParameters"]
+  parameter_write_actions = ["ssm:PutParameter"]
 }
 
 data "aws_iam_policy_document" "ecs_task_assume" {
@@ -114,6 +116,11 @@ data "aws_iam_policy_document" "api" {
     ]
     resources = [aws_kms_key.cell.arn]
   }
+
+  statement {
+    actions   = local.parameter_read_actions
+    resources = ["${local.parameter_arn_prefix}/api/*"]
+  }
 }
 
 resource "aws_iam_role_policy" "api" {
@@ -127,7 +134,64 @@ resource "aws_iam_role" "migrate" {
   assume_role_policy = data.aws_iam_policy_document.ecs_task_assume.json
 }
 
+data "aws_iam_policy_document" "migrate" {
+  statement {
+    actions   = local.parameter_read_actions
+    resources = ["${local.parameter_arn_prefix}/migrate/*"]
+  }
+
+  statement {
+    actions   = ["kms:Decrypt"]
+    resources = [aws_kms_key.cell.arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["ssm.${data.aws_region.current.region}.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "migrate" {
+  name   = "${local.name}-migrate"
+  policy = data.aws_iam_policy_document.migrate.json
+  role   = aws_iam_role.migrate.id
+}
+
 resource "aws_iam_role" "bootstrap" {
   name               = "${local.name}-bootstrap"
   assume_role_policy = data.aws_iam_policy_document.ecs_task_assume.json
+}
+
+data "aws_iam_policy_document" "bootstrap" {
+  statement {
+    actions = concat(local.parameter_read_actions, local.parameter_write_actions)
+    resources = [
+      "${local.parameter_arn_prefix}/api/*",
+      "${local.parameter_arn_prefix}/migrate/*",
+    ]
+  }
+
+  # Standard-tier SecureString parameters are encrypted directly under the key,
+  # so writes need kms:Encrypt. Advanced-tier envelope encryption would instead
+  # need kms:GenerateDataKey. Keep this in step with the tier in secret_ssm.go.
+  statement {
+    actions = [
+      "kms:Decrypt",
+      "kms:Encrypt",
+    ]
+    resources = [aws_kms_key.cell.arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["ssm.${data.aws_region.current.region}.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "bootstrap" {
+  name   = "${local.name}-bootstrap"
+  policy = data.aws_iam_policy_document.bootstrap.json
+  role   = aws_iam_role.bootstrap.id
 }

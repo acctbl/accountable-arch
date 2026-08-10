@@ -6,6 +6,8 @@ import (
 	"testing"
 )
 
+const proofKMSKeyARN = "arn:aws:kms:eu-west-2:453722413624:key/11111111-2222-3333-4444-555555555555"
+
 func TestLoadConfigAcceptsCompleteManagedBootstrapEnvironment(t *testing.T) {
 	t.Parallel()
 
@@ -13,17 +15,17 @@ func TestLoadConfigAcceptsCompleteManagedBootstrapEnvironment(t *testing.T) {
 aws_region = "eu-west-2"
 database_host = "database.example.com"
 environment = "development"
-infisical_machine_identity_id = "identity-bootstrap"
-infisical_project_id = "project-development"
-infisical_secret_root = "/development-01"
+kms_key_arn = "`+proofKMSKeyARN+`"
+parameter_root = "/accountable/development-01/development"
 `)
 	config, err := loadConfig([]string{"--config", path})
 	if err != nil {
 		t.Fatalf("loadConfig: %v", err)
 	}
 	if config.region != "eu-west-2" || config.databaseHost != "database.example.com" ||
-		config.apiSecrets.SecretPath != "/development-01/api" ||
-		config.migrateSecrets.SecretPath != "/development-01/migrate" {
+		config.apiSecrets.ParameterPath != "/accountable/development-01/development/api" ||
+		config.migrateSecrets.ParameterPath != "/accountable/development-01/development/migrate" ||
+		config.apiSecrets.KMSKeyARN != proofKMSKeyARN {
 		t.Fatalf("config = %#v", config)
 	}
 }
@@ -33,15 +35,16 @@ func TestLoadConfigRejectsMissingOrUnsafeManagedBootstrapEnvironment(t *testing.
 
 	base := fileConfig{
 		AWSRegion: "eu-west-2", DatabaseHost: "database.example.com", Environment: "development",
-		MachineIdentityID: "identity-bootstrap", ProjectID: "project-development",
-		SecretRoot: "/development-01",
+		KMSKeyARN: proofKMSKeyARN, ParameterRoot: "/accountable/development-01/development",
 	}
 	for name, mutate := range map[string]func(*fileConfig){
-		"local environment":      func(value *fileConfig) { value.Environment = "local" },
-		"relative secret root":   func(value *fileConfig) { value.SecretRoot = "accountable/cell" },
-		"traversing secret root": func(value *fileConfig) { value.SecretRoot = "/accountable/../cell" },
+		"local environment":         func(value *fileConfig) { value.Environment = "local" },
+		"relative parameter root":   func(value *fileConfig) { value.ParameterRoot = "accountable/cell" },
+		"traversing parameter root": func(value *fileConfig) { value.ParameterRoot = "/accountable/../cell" },
+		"trailing parameter root":   func(value *fileConfig) { value.ParameterRoot = "/accountable/cell/" },
+		"missing kms key":           func(value *fileConfig) { value.KMSKeyARN = "" },
+		"aliased kms key":           func(value *fileConfig) { value.KMSKeyARN = "alias/aws/ssm" },
 	} {
-		mutate := mutate
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			value := base
@@ -50,9 +53,8 @@ func TestLoadConfigRejectsMissingOrUnsafeManagedBootstrapEnvironment(t *testing.
 aws_region = "`+value.AWSRegion+`"
 database_host = "`+value.DatabaseHost+`"
 environment = "`+value.Environment+`"
-infisical_machine_identity_id = "`+value.MachineIdentityID+`"
-infisical_project_id = "`+value.ProjectID+`"
-infisical_secret_root = "`+value.SecretRoot+`"
+kms_key_arn = "`+value.KMSKeyARN+`"
+parameter_root = "`+value.ParameterRoot+`"
 `)
 			if _, err := loadConfig([]string{"--config", path}); err == nil {
 				t.Fatal("loadConfig accepted an unsafe environment")

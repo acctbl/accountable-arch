@@ -52,14 +52,9 @@ max_database_skew = "1s"`
 	if managed {
 		deploymentMode = "managed"
 		secrets = fmt.Sprintf(`[secrets]
-provider = "infisical"
-site_url = "https://eu.infisical.com"
+provider = "aws_parameter_store"
 aws_region = "eu-west-2"
-project_id = "accountable"
-environment = %q
-secret_path = "/api"
-auth_method = "aws_iam"
-machine_identity_id = "identity-api"`, environment)
+parameter_path = "/accountable/cell-a/%s/api"`, environment)
 		postgres = `[postgres]
 host = "postgres.internal"
 port = 5432
@@ -165,7 +160,7 @@ func TestManagedConfigIsCompleteAndExplicit(t *testing.T) {
 		t.Fatalf("loadConfig: %v", err)
 	}
 	if loaded.Environment != "staging" || loaded.Addr != "0.0.0.0:8080" ||
-		loaded.Foundation.Secrets.Provider != "infisical" || loaded.Foundation.Storage.Provider != "s3" ||
+		loaded.Foundation.Secrets.Provider != "aws_parameter_store" || loaded.Foundation.Storage.Provider != "s3" ||
 		len(loaded.Foundation.Fingerprint) != 64 {
 		t.Fatalf("loaded config = %+v", loaded)
 	}

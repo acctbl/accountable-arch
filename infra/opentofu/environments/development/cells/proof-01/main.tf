@@ -56,18 +56,14 @@ module "cell" {
     aws.global = aws.global
   }
 
-  account_id                    = "453722413624"
-  api_desired_count             = var.api_desired_count
-  api_machine_identity_id       = var.api_machine_identity_id
-  availability_zones            = ["eu-west-2a", "eu-west-2b"]
-  bootstrap_machine_identity_id = var.bootstrap_machine_identity_id
-  cell_id                       = "proof-01"
-  configuration_revision        = var.configuration_revision
-  cell_lifecycle                = "ephemeral"
-  environment                   = "development"
-  image_repository_arn          = "arn:aws:ecr:eu-west-2:453722413624:repository/accountable"
-  image_uri                     = var.image_uri
-  infisical_project_id          = var.infisical_project_id
-  migrate_machine_identity_id   = var.migrate_machine_identity_id
-  vpc_cidr                      = "10.30.0.0/16"
+  account_id             = "453722413624"
+  api_desired_count      = var.api_desired_count
+  availability_zones     = ["eu-west-2a", "eu-west-2b"]
+  cell_id                = "proof-01"
+  configuration_revision = var.configuration_revision
+  cell_lifecycle         = "ephemeral"
+  environment            = "development"
+  image_repository_arn   = "arn:aws:ecr:eu-west-2:453722413624:repository/accountable"
+  image_uri              = var.image_uri
+  vpc_cidr               = "10.30.0.0/16"
 }

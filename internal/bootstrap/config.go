@@ -3,7 +3,6 @@ package bootstrap
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -25,8 +24,6 @@ const (
 	DeploymentModeLocal          = "local"
 	DeploymentModeManaged        = "managed"
 	AccessPurposeFoundationProof = "foundation-proof"
-
-	infisicalCloudEUEndpoint = secret.InfisicalCloudEUEndpoint
 )
 
 var (
@@ -37,6 +34,7 @@ var (
 	awsKMSKeyARNPattern          = regexp.MustCompile(`^arn:aws(?:-us-gov)?:kms:([a-z0-9-]+):([0-9]{12}):key/[A-Za-z0-9-]+$`)
 	configurationRevisionPattern = regexp.MustCompile(`^[-A-Za-z0-9._]{1,128}$`)
 	cellIDPattern                = regexp.MustCompile(`^[-A-Za-z0-9._]{1,64}$`)
+	parameterPathPattern         = regexp.MustCompile(`^(?:/[A-Za-z0-9._-]+){1,14}$`)
 )
 
 type Config struct {
@@ -101,15 +99,10 @@ type CapabilitiesFileConfig struct {
 }
 
 type SecretsFileConfig struct {
-	Provider          string `toml:"provider"`
-	Directory         string `toml:"directory"`
-	SiteURL           string `toml:"site_url"`
-	AWSRegion         string `toml:"aws_region"`
-	ProjectID         string `toml:"project_id"`
-	Environment       string `toml:"environment"`
-	SecretPath        string `toml:"secret_path"`
-	AuthMethod        string `toml:"auth_method"`
-	MachineIdentityID string `toml:"machine_identity_id"`
+	Provider      string `toml:"provider"`
+	Directory     string `toml:"directory"`
+	AWSRegion     string `toml:"aws_region"`
+	ParameterPath string `toml:"parameter_path"`
 }
 
 type DatabaseFileConfig struct {
@@ -202,7 +195,7 @@ func Parse(configPath, fingerprint string, raw FileConfig) (Config, error) {
 	}
 	var secretsConfig secret.Config
 	if capabilities.Secrets {
-		secretsConfig, err = parseSecrets(raw.Environment, managed, raw.AWSRegion, configPath, *raw.Secrets)
+		secretsConfig, err = parseSecrets(managed, raw.AWSRegion, configPath, *raw.Secrets)
 		if err != nil {
 			return Config{}, err
 		}
@@ -279,55 +272,44 @@ func parseCapabilities(raw FileConfig) (Capabilities, error) {
 	}, nil
 }
 
-func parseSecrets(environment string, managed bool, awsRegion, configPath string, raw SecretsFileConfig) (secret.Config, error) {
+func parseSecrets(managed bool, awsRegion, configPath string, raw SecretsFileConfig) (secret.Config, error) {
 	if !managed {
 		if raw.Provider != secret.ProviderFile || raw.Directory == "" {
 			return secret.Config{}, errors.New("local secrets.provider must be file with a directory")
 		}
-		if raw.SiteURL != "" || raw.AWSRegion != "" || raw.ProjectID != "" || raw.Environment != "" ||
-			raw.SecretPath != "" || raw.AuthMethod != "" || raw.MachineIdentityID != "" {
-			return secret.Config{}, errors.New("file secrets cannot include Infisical settings")
+		if raw.AWSRegion != "" || raw.ParameterPath != "" {
+			return secret.Config{}, errors.New("file secrets cannot include Parameter Store settings")
 		}
 		return secret.Config{Provider: raw.Provider, Directory: absoluteFrom(filepath.Dir(configPath), raw.Directory)}, nil
 	}
 	if raw.Directory != "" {
-		return secret.Config{}, errors.New("infisical secrets cannot include a file directory")
+		return secret.Config{}, errors.New("managed secrets cannot include a file directory")
 	}
-	if raw.Provider != secret.ProviderInfisical {
-		return secret.Config{}, errors.New("managed secrets.provider must be infisical")
-	}
-	parsedURL, err := url.Parse(raw.SiteURL)
-	if err != nil || parsedURL.String() != infisicalCloudEUEndpoint {
-		return secret.Config{}, errors.New("managed secrets.site_url must select Infisical Cloud EU")
+	if raw.Provider != secret.ProviderParameterStore {
+		return secret.Config{}, errors.New("managed secrets.provider must be aws_parameter_store")
 	}
 	if !awsRegionPattern.MatchString(raw.AWSRegion) {
-		return secret.Config{}, errors.New("infisical aws_region is invalid")
+		return secret.Config{}, errors.New("secrets aws_region is invalid")
 	}
 	if raw.AWSRegion != awsRegion {
-		return secret.Config{}, errors.New("infisical aws_region must match the top-level aws_region")
+		return secret.Config{}, errors.New("secrets aws_region must match the top-level aws_region")
 	}
-	if raw.ProjectID == "" || raw.Environment == "" || raw.MachineIdentityID == "" {
-		return secret.Config{}, errors.New("infisical project_id, environment, and machine_identity_id are required")
-	}
-	if raw.Environment != environment {
-		return secret.Config{}, errors.New("infisical environment must match the application environment")
-	}
-	if raw.AuthMethod != secret.AuthAWSIAM {
-		return secret.Config{}, errors.New("infisical auth_method must be aws_iam")
-	}
-	if raw.SecretPath == "" || !strings.HasPrefix(raw.SecretPath, "/") || path.Clean(raw.SecretPath) != raw.SecretPath {
-		return secret.Config{}, errors.New("infisical secret_path must be an absolute clean path")
+	if err := validateParameterPath(raw.ParameterPath); err != nil {
+		return secret.Config{}, err
 	}
 	return secret.Config{
-		Provider:          raw.Provider,
-		SiteURL:           raw.SiteURL,
-		AWSRegion:         raw.AWSRegion,
-		ProjectID:         raw.ProjectID,
-		Environment:       raw.Environment,
-		SecretPath:        raw.SecretPath,
-		AuthMethod:        raw.AuthMethod,
-		MachineIdentityID: raw.MachineIdentityID,
+		Provider:      raw.Provider,
+		AWSRegion:     raw.AWSRegion,
+		ParameterPath: raw.ParameterPath,
 	}, nil
+}
+
+func validateParameterPath(value string) error {
+	if value == "" || !strings.HasPrefix(value, "/") || strings.HasSuffix(value, "/") ||
+		path.Clean(value) != value || !parameterPathPattern.MatchString(value) {
+		return errors.New("secrets parameter_path must be an absolute clean Parameter Store path")
+	}
+	return nil
 }
 
 func parseDatabase(managed bool, configPath string, raw DatabaseFileConfig) (database.Config, error) {

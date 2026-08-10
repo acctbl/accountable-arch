@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/acctbl/accountable/internal/configfile"
-	"github.com/acctbl/accountable/internal/platform/clock"
 	"github.com/acctbl/accountable/internal/platform/secret"
 	"github.com/jackc/pgx/v5"
 )
@@ -33,7 +32,11 @@ const (
 	passwordRef           secret.Ref = "database-password"
 )
 
-var awsRegionPattern = regexp.MustCompile(`^[a-z]{2}(?:-gov)?-[a-z]+-\d$`)
+var (
+	awsRegionPattern     = regexp.MustCompile(`^[a-z]{2}(?:-gov)?-[a-z]+-\d$`)
+	awsKMSKeyARNPattern  = regexp.MustCompile(`^arn:aws(?:-us-gov)?:kms:[a-z0-9-]+:[0-9]{12}:key/[A-Za-z0-9-]+$`)
+	parameterPathPattern = regexp.MustCompile(`^(?:/[A-Za-z0-9._-]+){1,13}$`)
+)
 
 type config struct {
 	apiSecrets     secret.Config
@@ -44,12 +47,11 @@ type config struct {
 }
 
 type fileConfig struct {
-	AWSRegion         string `toml:"aws_region"`
-	DatabaseHost      string `toml:"database_host"`
-	Environment       string `toml:"environment"`
-	MachineIdentityID string `toml:"infisical_machine_identity_id"`
-	ProjectID         string `toml:"infisical_project_id"`
-	SecretRoot        string `toml:"infisical_secret_root"`
+	AWSRegion     string `toml:"aws_region"`
+	DatabaseHost  string `toml:"database_host"`
+	Environment   string `toml:"environment"`
+	KMSKeyARN     string `toml:"kms_key_arn"`
+	ParameterRoot string `toml:"parameter_root"`
 }
 
 func main() {
@@ -66,11 +68,11 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	apiStore, err := secret.NewStore(ctx, config.apiSecrets, clock.System{})
+	apiStore, err := secret.NewStore(ctx, config.apiSecrets)
 	if err != nil {
 		return errors.New("API secret store is unavailable")
 	}
-	migrateStore, err := secret.NewStore(ctx, config.migrateSecrets, clock.System{})
+	migrateStore, err := secret.NewStore(ctx, config.migrateSecrets)
 	if err != nil {
 		return errors.New("migration secret store is unavailable")
 	}
@@ -110,25 +112,23 @@ func loadConfig(args []string) (config, error) {
 	region := raw.AWSRegion
 	databaseHost := raw.DatabaseHost
 	environment := raw.Environment
-	machineIdentityID := raw.MachineIdentityID
-	projectID := raw.ProjectID
-	secretRoot := raw.SecretRoot
+	kmsKeyARN := raw.KMSKeyARN
+	parameterRoot := raw.ParameterRoot
 	if !awsRegionPattern.MatchString(region) || net.ParseIP(databaseHost) != nil || strings.TrimSpace(databaseHost) == "" ||
 		(environment != "development" && environment != "staging" && environment != "production") ||
-		machineIdentityID == "" || projectID == "" || secretRoot == "" || !strings.HasPrefix(secretRoot, "/") ||
-		path.Clean(secretRoot) != secretRoot || secretRoot == "/" {
+		!awsKMSKeyARNPattern.MatchString(kmsKeyARN) ||
+		!parameterPathPattern.MatchString(parameterRoot) || path.Clean(parameterRoot) != parameterRoot {
 		return config{}, errors.New("managed bootstrap environment is invalid")
 	}
-	secretConfig := func(secretPath string) secret.Config {
+	secretConfig := func(parameterPath string) secret.Config {
 		return secret.Config{
-			Provider: secret.ProviderInfisical, SiteURL: secret.InfisicalCloudEUEndpoint, AWSRegion: region,
-			ProjectID: projectID, Environment: environment, SecretPath: secretPath,
-			AuthMethod: secret.AuthAWSIAM, MachineIdentityID: machineIdentityID,
+			Provider: secret.ProviderParameterStore, AWSRegion: region,
+			ParameterPath: parameterPath, KMSKeyARN: kmsKeyARN,
 		}
 	}
 	return config{
-		apiSecrets: secretConfig(secretRoot + "/api"), databaseHost: databaseHost, environment: environment,
-		migrateSecrets: secretConfig(secretRoot + "/migrate"), region: region,
+		apiSecrets: secretConfig(parameterRoot + "/api"), databaseHost: databaseHost, environment: environment,
+		migrateSecrets: secretConfig(parameterRoot + "/migrate"), region: region,
 	}, nil
 }
 
@@ -144,7 +144,7 @@ func resolveMasterPassword(ctx context.Context) (secret.SecretValue, error) {
 	return values[masterPasswordRef], nil
 }
 
-func resolveDatabasePassword(ctx context.Context, store *secret.InfisicalSecretStore) (secret.SecretValue, error) {
+func resolveDatabasePassword(ctx context.Context, store secret.SecretStore) (secret.SecretValue, error) {
 	values, err := store.ResolveOrCreateBatch(ctx, []secret.Ref{passwordRef}, func(secret.Ref) ([]byte, error) {
 		value := make([]byte, 32)
 		if _, err := rand.Read(value); err != nil {

@@ -18,16 +18,6 @@ variable "api_desired_count" {
   }
 }
 
-variable "api_machine_identity_id" {
-  description = "Infisical AWS IAM machine identity used by the API"
-  type        = string
-
-  validation {
-    condition     = trimspace(var.api_machine_identity_id) != ""
-    error_message = "api_machine_identity_id is required."
-  }
-}
-
 variable "availability_zones" {
   description = "Two Availability Zones used by the cell"
   type        = list(string)
@@ -35,16 +25,6 @@ variable "availability_zones" {
   validation {
     condition     = length(var.availability_zones) == 2 && length(distinct(var.availability_zones)) == 2
     error_message = "availability_zones must contain exactly two distinct Availability Zones."
-  }
-}
-
-variable "bootstrap_machine_identity_id" {
-  description = "Infisical AWS IAM machine identity used by database bootstrap"
-  type        = string
-
-  validation {
-    condition     = trimspace(var.bootstrap_machine_identity_id) != ""
-    error_message = "bootstrap_machine_identity_id is required."
   }
 }
 
@@ -119,26 +99,6 @@ variable "image_uri" {
   validation {
     condition     = can(regex("^[^[:space:]@]+@sha256:[a-f0-9]{64}$", var.image_uri))
     error_message = "image_uri must be pinned to a sha256 manifest digest."
-  }
-}
-
-variable "infisical_project_id" {
-  description = "Infisical project containing the cell runtime secrets"
-  type        = string
-
-  validation {
-    condition     = trimspace(var.infisical_project_id) != ""
-    error_message = "infisical_project_id is required."
-  }
-}
-
-variable "migrate_machine_identity_id" {
-  description = "Infisical AWS IAM machine identity used by migrations"
-  type        = string
-
-  validation {
-    condition     = trimspace(var.migrate_machine_identity_id) != ""
-    error_message = "migrate_machine_identity_id is required."
   }
 }
 

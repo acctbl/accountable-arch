@@ -136,8 +136,6 @@ linters:
               desc: domain/application must not import the broker client
             - pkg: go.opentelemetry.io/otel/exporters
               desc: domain/application must not import telemetry exporters
-            - pkg: github.com/infisical/
-              desc: domain/application must not import secret provider SDKs
     forbidigo:
       analyze-types: true
       forbid:
