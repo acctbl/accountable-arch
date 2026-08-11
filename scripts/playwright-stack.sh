@@ -20,6 +20,7 @@ pnpm --filter @accountable/web build
 
 API_CONFIG="$STACK_TLS_DIR/api.toml"
 MIGRATE_CONFIG="$STACK_TLS_DIR/migrate.toml"
+API_RELEASE="$STACK_TLS_DIR/release.json"
 SECRETS_DIR="$STACK_TLS_DIR/secrets"
 STORAGE_DIR="$STACK_TLS_DIR/storage"
 mkdir -p "$SECRETS_DIR" "$STORAGE_DIR"
@@ -53,6 +54,15 @@ EOF
 {
 	write_foundation api
 	cat <<EOF
+
+[client_telemetry]
+release_id = "018f47d2-7f00-7abc-8def-1234567890ab"
+web_asset_digest = "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+configuration_schema_version = 1
+configuration_revision = "playwright"
+configuration_fingerprint = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+proof_key_active_ref = "proof-key-active"
+proof_key_standby_ref = "proof-key-standby"
 
 [server]
 listen_address = "127.0.0.1:18080"
@@ -105,7 +115,9 @@ max_database_skew = "5s"
 EOF
 done
 
-mise exec -- go run ./cmd/migrate --config "$MIGRATE_CONFIG"
+bash scripts/mint-local-release.sh "$API_RELEASE"
+
+mise exec -- go run ./cmd/migrate --config "$MIGRATE_CONFIG" --release "$API_RELEASE"
 API_PID=""
 WEB_PID=""
 cleanup() {
@@ -117,14 +129,14 @@ cleanup() {
 		kill "$API_PID" 2>/dev/null || true
 		wait "$API_PID" 2>/dev/null || true
 	fi
-	rm -f "$API_CONFIG" "$MIGRATE_CONFIG" "$STACK_TLS_DIR/cert.pem" "$STACK_TLS_DIR/key.pem"
+	rm -f "$API_CONFIG" "$MIGRATE_CONFIG" "$API_RELEASE" "$STACK_TLS_DIR/cert.pem" "$STACK_TLS_DIR/key.pem"
 	rm -f "$SECRETS_DIR/database.password" "$SECRETS_DIR/crypto.primary_key"
 	rmdir "$SECRETS_DIR" "$STORAGE_DIR" 2>/dev/null || true
 	rmdir "$STACK_TLS_DIR" 2>/dev/null || true
 }
 trap cleanup EXIT
 
-mise exec -- go run ./cmd/api --config "$API_CONFIG" &
+mise exec -- go run ./cmd/api --config "$API_CONFIG" --release "$API_RELEASE" &
 API_PID=$!
 
 API_READY=false

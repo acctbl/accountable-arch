@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/acctbl/accountable/internal/appconfig"
 	"github.com/acctbl/accountable/internal/bootstrap"
+	"github.com/acctbl/accountable/internal/platform/telemetry"
 )
 
 func main() {
@@ -20,27 +23,45 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, args []string) error {
-	config, err := appconfig.LoadFoundation(args, "")
+func run(ctx context.Context, args []string) (runErr error) {
+	config, release, err := appconfig.LoadRuntime(args, "")
 	if err != nil {
 		return err
 	}
-	fmt.Printf(
-		"configuration: environment=%s deployment_mode=%s cell=%s role=%s revision=%s fingerprint=%s\n",
-		config.Environment, config.DeploymentMode, config.CellID, config.RuntimeRole, config.Revision,
-		config.Fingerprint,
+	signals, err := telemetry.StartRuntime(
+		ctx,
+		runtimeIdentity(config, release),
+		config.Telemetry,
+		config.Capabilities.Telemetry,
 	)
-	report, err := bootstrap.Preflight(ctx, config)
 	if err != nil {
 		return err
 	}
-	flagState := "safe_default"
-	if !report.BootstrapFlag.Defaulted {
-		flagState = "evaluated"
+	defer func() {
+		runErr = errors.Join(runErr, signals.Stop(context.WithoutCancel(ctx)))
+	}()
+	if _, err := bootstrap.Preflight(ctx, config); err != nil {
+		signals.Emit(ctx, slog.LevelError, "runtime.configuration_failed", nil)
+		return err
 	}
-	fmt.Printf(
-		"preflight: safe; revision: %s; fingerprint: %s; feature_flag: %s\n",
-		config.Revision, config.Fingerprint, flagState,
-	)
+	if !config.Capabilities.Telemetry {
+		fmt.Println("preflight: safe")
+	}
+	signals.Emit(ctx, slog.LevelInfo, "runtime.task_completed", nil)
 	return nil
+}
+
+// runtimeIdentity builds the resource identity for one one-off runtime.
+func runtimeIdentity(config bootstrap.Config, release telemetry.RuntimeRelease) telemetry.RuntimeIdentity {
+	return telemetry.RuntimeIdentity{
+		Release: release,
+		Config: telemetry.ConfigIdentity{
+			SchemaVersion: config.SchemaVersion,
+			Revision:      config.Revision,
+			Fingerprint:   config.Fingerprint,
+		},
+		Environment: config.Environment,
+		CellID:      config.CellID,
+		RuntimeRole: config.RuntimeRole,
+	}
 }

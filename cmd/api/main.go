@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/acctbl/accountable/internal/appconfig"
+	"github.com/acctbl/accountable/internal/platform/telemetry"
 )
 
 func main() {
@@ -20,15 +22,17 @@ func main() {
 }
 
 func run(ctx context.Context, args []string) error {
-	config, err := loadConfig(args)
+	configPath, releasePath, err := appconfig.RuntimePaths(args)
 	if err != nil {
 		return err
 	}
-	log.Printf(
-		"configuration loaded environment=%s deployment_mode=%s cell=%s role=%s revision=%s fingerprint=%s",
-		config.Foundation.Environment, config.Foundation.DeploymentMode, config.Foundation.CellID,
-		config.Foundation.RuntimeRole,
-		config.Foundation.Revision, config.Foundation.Fingerprint,
-	)
-	return serve(ctx, config)
+	config, err := loadConfig([]string{"--config", configPath})
+	if err != nil {
+		return err
+	}
+	release, err := telemetry.ReadRuntimeRelease(releasePath)
+	if err != nil {
+		return err
+	}
+	return serve(ctx, config, release)
 }

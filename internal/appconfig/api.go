@@ -11,26 +11,51 @@ import (
 
 	"github.com/acctbl/accountable/internal/bootstrap"
 	"github.com/acctbl/accountable/internal/configfile"
+	"github.com/acctbl/accountable/internal/platform/telemetry"
 )
 
 const HTTPWriteTimeout = 30 * time.Second
 
 type API struct {
-	Addr              string
-	Environment       string
-	ArchitectureProbe bool
-	AllowedOrigins    []string
-	TrustedProxies    []*net.IPNet
-	TLSCertFile       string
-	TLSKeyFile        string
-	UnaryRPCDeadline  time.Duration
-	StreamRPCDeadline time.Duration
-	Foundation        bootstrap.Config
+	Addr                    string
+	Environment             string
+	ArchitectureProbe       bool
+	AllowedOrigins          []string
+	TrustedProxies          []*net.IPNet
+	TLSCertFile             string
+	TLSKeyFile              string
+	UnaryRPCDeadline        time.Duration
+	StreamRPCDeadline       time.Duration
+	Foundation              bootstrap.Config
+	ClientTelemetry         telemetry.ClientIdentityTuple
+	PreviousClientTelemetry *telemetry.ClientIdentityTuple
+	ProofKeyActiveRef       string
+	ProofKeyStandbyRef      string
 }
 
 type APIFile struct {
 	bootstrap.FileConfig
-	Server *ServerFileConfig `toml:"server"`
+	Server          *ServerFileConfig          `toml:"server"`
+	ClientTelemetry *ClientTelemetryFileConfig `toml:"client_telemetry"`
+}
+
+type ClientTelemetryFileConfig struct {
+	ReleaseID                  string                    `toml:"release_id"`
+	WebAssetDigest             string                    `toml:"web_asset_digest"`
+	ConfigurationSchemaVersion int                       `toml:"configuration_schema_version"`
+	ConfigurationRevision      string                    `toml:"configuration_revision"`
+	ConfigurationFingerprint   string                    `toml:"configuration_fingerprint"`
+	ProofKeyActiveRef          string                    `toml:"proof_key_active_ref"`
+	ProofKeyStandbyRef         string                    `toml:"proof_key_standby_ref"`
+	Previous                   *ClientIdentityFileConfig `toml:"previous"`
+}
+
+type ClientIdentityFileConfig struct {
+	ReleaseID                  string `toml:"release_id"`
+	WebAssetDigest             string `toml:"web_asset_digest"`
+	ConfigurationSchemaVersion int    `toml:"configuration_schema_version"`
+	ConfigurationRevision      string `toml:"configuration_revision"`
+	ConfigurationFingerprint   string `toml:"configuration_fingerprint"`
 }
 
 type ServerFileConfig struct {
@@ -41,6 +66,35 @@ type ServerFileConfig struct {
 	TLSPrivateKey     string   `toml:"tls_private_key_file"`
 	UnaryRPCTimeout   string   `toml:"unary_rpc_timeout"`
 	StreamRPCTimeout  string   `toml:"stream_rpc_timeout"`
+}
+
+// RuntimePaths reports the configuration and release paths that every managed
+// runtime receives. Release identity always arrives beside the configuration and
+// never inside it.
+func RuntimePaths(args []string) (configPath string, releasePath string, err error) {
+	paths, err := configfile.AbsolutePaths(args, "--config", "--release")
+	if err != nil {
+		return "", "", err
+	}
+	return paths["--config"], paths["--release"], nil
+}
+
+// LoadRuntime reads the configuration and the verified release document for one
+// managed runtime role.
+func LoadRuntime(args []string, expectedRole string) (bootstrap.Config, telemetry.RuntimeRelease, error) {
+	configPath, releasePath, err := RuntimePaths(args)
+	if err != nil {
+		return bootstrap.Config{}, telemetry.RuntimeRelease{}, err
+	}
+	release, err := telemetry.ReadRuntimeRelease(releasePath)
+	if err != nil {
+		return bootstrap.Config{}, telemetry.RuntimeRelease{}, err
+	}
+	config, err := LoadFoundation([]string{"--config", configPath}, expectedRole)
+	if err != nil {
+		return bootstrap.Config{}, telemetry.RuntimeRelease{}, err
+	}
+	return config, release, nil
 }
 
 func LoadAPI(args []string) (API, error) {
@@ -55,6 +109,36 @@ func parseAPI(raw APIFile, foundationConfig bootstrap.Config) (API, error) {
 	server := raw.Server
 	if server == nil {
 		return API{}, errors.New("server section is required when runtime_role is api")
+	}
+	if raw.ClientTelemetry == nil {
+		return API{}, errors.New("client_telemetry section is required when runtime_role is api")
+	}
+	clientIdentity := telemetry.ClientIdentityTuple{
+		Application: "web", ReleaseID: raw.ClientTelemetry.ReleaseID,
+		ArtifactType: "web_assets", ArtifactDigest: raw.ClientTelemetry.WebAssetDigest,
+		ConfigurationSchemaVersion: raw.ClientTelemetry.ConfigurationSchemaVersion,
+		ConfigurationRevision:      raw.ClientTelemetry.ConfigurationRevision,
+		ConfigurationFingerprint:   raw.ClientTelemetry.ConfigurationFingerprint,
+	}
+	if err := telemetry.ValidateClientIdentityTuple(clientIdentity); err != nil {
+		return API{}, err
+	}
+	var previousClientIdentity *telemetry.ClientIdentityTuple
+	if previous := raw.ClientTelemetry.Previous; previous != nil {
+		identity := telemetry.ClientIdentityTuple{
+			Application: "web", ReleaseID: previous.ReleaseID,
+			ArtifactType: "web_assets", ArtifactDigest: previous.WebAssetDigest,
+			ConfigurationSchemaVersion: previous.ConfigurationSchemaVersion,
+			ConfigurationRevision:      previous.ConfigurationRevision,
+			ConfigurationFingerprint:   previous.ConfigurationFingerprint,
+		}
+		if err := telemetry.ValidateClientIdentityTuple(identity); err != nil || identity == clientIdentity {
+			return API{}, telemetry.ErrInvalidContract
+		}
+		previousClientIdentity = &identity
+	}
+	if raw.ClientTelemetry.ProofKeyActiveRef == "" {
+		return API{}, errors.New("client_telemetry active proof key reference is required")
 	}
 	if server.ListenAddress == "" {
 		return API{}, errors.New("server.listen_address is required")
@@ -109,6 +193,10 @@ func parseAPI(raw APIFile, foundationConfig bootstrap.Config) (API, error) {
 		AllowedOrigins:    server.AllowedOrigins, TrustedProxies: trusted,
 		TLSCertFile: server.TLSCertificate, TLSKeyFile: server.TLSPrivateKey,
 		UnaryRPCDeadline: unaryDeadline, StreamRPCDeadline: streamDeadline, Foundation: foundationConfig,
+		ClientTelemetry:         clientIdentity,
+		PreviousClientTelemetry: previousClientIdentity,
+		ProofKeyActiveRef:       raw.ClientTelemetry.ProofKeyActiveRef,
+		ProofKeyStandbyRef:      raw.ClientTelemetry.ProofKeyStandbyRef,
 	}, nil
 }
 

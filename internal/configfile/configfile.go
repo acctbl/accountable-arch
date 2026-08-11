@@ -3,22 +3,51 @@ package configfile
 import (
 	"bytes"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 )
 
 func AbsolutePath(args []string) (string, error) {
-	if len(args) != 2 || args[0] != "--config" || args[1] == "" {
-		return "", errors.New("usage: --config <absolute-path>")
+	paths, err := AbsolutePaths(args, "--config")
+	if err != nil {
+		return "", err
 	}
-	if !filepath.IsAbs(args[1]) {
-		return "", errors.New("--config path must be absolute")
+	return paths["--config"], nil
+}
+
+// AbsolutePaths reports one absolute path for each required flag. The argument
+// list must carry exactly those flags, so an unexpected argument never passes.
+func AbsolutePaths(args []string, flags ...string) (map[string]string, error) {
+	usage := fmt.Errorf("usage: %s", strings.Join(flagUsage(flags), " "))
+	if len(args) != len(flags)*2 {
+		return nil, usage
 	}
-	return filepath.Clean(args[1]), nil
+	seen := make(map[string]string, len(flags))
+	for index := 0; index < len(args); index += 2 {
+		name, value := args[index], args[index+1]
+		if _, duplicate := seen[name]; duplicate || value == "" || !filepath.IsAbs(value) {
+			return nil, usage
+		}
+		seen[name] = filepath.Clean(value)
+	}
+	for _, flag := range flags {
+		if _, present := seen[flag]; !present {
+			return nil, usage
+		}
+	}
+	return seen, nil
+}
+
+func flagUsage(flags []string) []string {
+	usage := make([]string, 0, len(flags))
+	for _, flag := range flags {
+		usage = append(usage, flag+" <absolute-path>")
+	}
+	return usage
 }
 
 func Decode(path string, target any) error {

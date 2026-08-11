@@ -11,11 +11,12 @@ DEV_DIR="$(mktemp -d "${TMPDIR:-/tmp}/accountable-api-dev.XXXXXX")"
 SECRETS_DIR="$DEV_DIR/secrets"
 STORAGE_DIR="$DEV_DIR/storage"
 API_CONFIG="$DEV_DIR/api.toml"
+API_RELEASE="$DEV_DIR/release.json"
 MIGRATE_CONFIG="$DEV_DIR/migrate.toml"
 mkdir -p "$SECRETS_DIR" "$STORAGE_DIR"
 
 cleanup() {
-	rm -f "$SECRETS_DIR/database.password" "$SECRETS_DIR/crypto.primary_key" "$API_CONFIG" "$MIGRATE_CONFIG"
+	rm -f "$SECRETS_DIR/database.password" "$SECRETS_DIR/crypto.primary_key" "$API_CONFIG" "$MIGRATE_CONFIG" "$API_RELEASE"
 	rmdir "$SECRETS_DIR" "$STORAGE_DIR" "$DEV_DIR" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -51,6 +52,15 @@ EOF
 {
 	write_foundation api
 	cat <<EOF
+
+[client_telemetry]
+release_id = "018f47d2-7f00-7abc-8def-1234567890ab"
+web_asset_digest = "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+configuration_schema_version = 1
+configuration_revision = "local"
+configuration_fingerprint = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+proof_key_active_ref = "proof-key-active"
+proof_key_standby_ref = "proof-key-standby"
 
 [server]
 listen_address = "127.0.0.1:8080"
@@ -101,6 +111,10 @@ max_database_skew = "5s"
 EOF
 done
 
-go run ./cmd/migrate --config "$MIGRATE_CONFIG"
-go run ./cmd/preflight --config "$API_CONFIG"
-go run ./cmd/api --config "$API_CONFIG"
+# Local runs have no signed release, so they mint one local release identity.
+# Release identity never comes from a configuration value.
+bash scripts/mint-local-release.sh "$API_RELEASE"
+
+go run ./cmd/migrate --config "$MIGRATE_CONFIG" --release "$API_RELEASE"
+go run ./cmd/preflight --config "$API_CONFIG" --release "$API_RELEASE"
+go run ./cmd/api --config "$API_CONFIG" --release "$API_RELEASE"
