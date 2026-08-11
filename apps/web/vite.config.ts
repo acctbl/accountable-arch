@@ -11,19 +11,36 @@ import {
 	contentSecurityPolicy,
 	documentContentSecurityPolicy,
 } from "./edge-contract";
-import { localeBootstrapScript } from "./src/i18n/bootstrap";
+import { documentBootstrapScript } from "./src/document-bootstrap";
 
-function localeBootstrap(includePseudoLocales: boolean): Plugin {
+function documentBootstrap(
+	includePseudoLocales: boolean,
+	inlineRuntimeConfig: boolean,
+): Plugin {
 	return {
-		name: "accountable:locale-bootstrap",
+		name: "accountable:document-bootstrap",
 		transformIndexHtml() {
-			return [
+			const tags: {
+				tag: string;
+				children: string;
+				injectTo: "head";
+			}[] = [
 				{
 					tag: "script",
-					children: localeBootstrapScript(includePseudoLocales),
+					children: documentBootstrapScript(includePseudoLocales),
 					injectTo: "head",
 				},
 			];
+
+			if (inlineRuntimeConfig) {
+				tags.unshift({
+					tag: "script",
+					children: `window.__ACCOUNTABLE_RUNTIME_CONFIG__=${runtimeConfigBody()};`,
+					injectTo: "head",
+				});
+			}
+
+			return tags;
 		},
 	};
 }
@@ -127,7 +144,7 @@ const config = defineConfig(({ command }) => {
 		},
 		plugins: [
 			edgeContractSimulator(),
-			localeBootstrap(includePseudoLocales),
+			documentBootstrap(includePseudoLocales, command !== "build"),
 			tailwindcss(),
 			tanstackRouter({ target: "react", autoCodeSplitting: true }),
 			viteReact(),

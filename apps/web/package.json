@@ -11,7 +11,9 @@
     "format:check": "biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false .",
     "lint": "biome lint",
     "typecheck": "pnpm i18n:compile && tsc --noEmit",
-    "check": "pnpm i18n:check && biome check && pnpm typecheck && vitest run",
+    "check": "pnpm csp:check && pnpm i18n:check && biome check && pnpm typecheck && vitest run",
+    "csp:check": "node scripts/sync-content-security-policy.mjs",
+    "csp:write": "node scripts/sync-content-security-policy.mjs --write",
     "i18n:extract": "formatjs extract 'src/**/*.{ts,tsx}' --ignore='**/*.d.ts' --ignore='**/*.test.ts' --ignore='**/*.test.tsx' --out-file src/i18n/messages/en.json",
     "i18n:compile": "formatjs compile-folder src/i18n/messages src/i18n/compiled --ast && formatjs compile src/i18n/messages/en.json --ast --pseudo-locale en-XA --out-file src/i18n/compiled/en-XA.json && formatjs compile src/i18n/messages/en.json --ast --pseudo-locale en-XB --out-file src/i18n/compiled/en-XB.json",
     "i18n:verify": "node scripts/verify-message-ids.mjs",
@@ -22,6 +24,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@accountable/client-telemetry": "workspace:*",
     "@accountable/proto": "workspace:*",
     "@accountable/ui": "workspace:*",
     "@base-ui/react": "^1.6.0",
@@ -35,7 +38,8 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "react-intl": "catalog:",
-    "valibot": "catalog:"
+    "valibot": "catalog:",
+    "web-vitals": "catalog:"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",

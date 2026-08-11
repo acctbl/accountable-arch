@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { documentBootstrapScript } from "./src/document-bootstrap";
 
 export const cacheControl = {
 	runtimeConfig: "no-store",
@@ -6,13 +7,39 @@ export const cacheControl = {
 	document: "no-cache",
 } as const;
 
-export const contentSecurityPolicy = readFileSync(
-	new URL(
-		"../../infra/opentofu/modules/cell/content-security-policy.txt",
-		import.meta.url,
-	),
-	"utf8",
-).trim();
+const CONTENT_SECURITY_POLICY_TEMPLATE = [
+	"default-src 'self'",
+	"script-src 'self' 'sha256-SCRIPT_HASH'",
+	"style-src 'self' 'unsafe-inline'",
+	"img-src 'self' data:",
+	"font-src 'self'",
+	"connect-src 'self'",
+	"worker-src 'self'",
+	"manifest-src 'self'",
+	"base-uri 'none'",
+	"object-src 'none'",
+	"frame-ancestors 'none'",
+	"form-action 'self'",
+].join("; ");
+
+export function documentBootstrapScriptHash(
+	includePseudoLocales = false,
+): string {
+	return createHash("sha256")
+		.update(documentBootstrapScript(includePseudoLocales))
+		.digest("base64");
+}
+
+export function buildContentSecurityPolicy(
+	includePseudoLocales = false,
+): string {
+	return CONTENT_SECURITY_POLICY_TEMPLATE.replace(
+		"SCRIPT_HASH",
+		documentBootstrapScriptHash(includePseudoLocales),
+	);
+}
+
+export const contentSecurityPolicy = buildContentSecurityPolicy(false);
 
 export function withConnectSource(policy: string, source: string): string {
 	return policy

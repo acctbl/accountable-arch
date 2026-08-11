@@ -28,6 +28,7 @@ export type InitialLocaleState = {
 	bundle: LocaleBundle;
 	formattingLocalePreference: Locale | null;
 	loadError: Error | null;
+	hydrate?: boolean;
 };
 
 type LocaleProviderState = LocaleBundle & {
@@ -121,6 +122,18 @@ export async function loadInitialLocaleState(): Promise<InitialLocaleState> {
 	}
 }
 
+export function createSyncInitialLocaleState(): InitialLocaleState {
+	return {
+		bundle: {
+			locale: negotiate(),
+			messages: sourceMessages,
+		},
+		formattingLocalePreference: readFormattingLocalePreference(),
+		loadError: null,
+		hydrate: true,
+	};
+}
+
 export function LocaleProvider({
 	children,
 	initialState,
@@ -143,6 +156,36 @@ export function LocaleProvider({
 		activeLocale.current = bundle.locale;
 		applyDocumentLocale(bundle.locale);
 	}, [bundle.locale]);
+
+	React.useEffect(() => {
+		if (!initialState.hydrate) {
+			return undefined;
+		}
+
+		const request = ++latestRequest.current;
+		const locale = initialState.bundle.locale;
+
+		void loadBundle(locale)
+			.then((loaded) => {
+				if (latestRequest.current !== request) {
+					return;
+				}
+
+				setBundle(loaded);
+				setLoadError(null);
+			})
+			.catch((cause: unknown) => {
+				if (latestRequest.current !== request) {
+					return;
+				}
+
+				const error = asError(cause);
+				console.error("Failed to load locale catalog", error);
+				setLoadError(error);
+			});
+
+		return undefined;
+	}, [initialState.bundle.locale, initialState.hydrate, loadBundle]);
 
 	const setLocale = React.useCallback(
 		(nextLocale: Locale) => {

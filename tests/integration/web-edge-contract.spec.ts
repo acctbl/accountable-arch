@@ -1,13 +1,11 @@
-import { createHash } from "node:crypto";
-
 import { expect, test } from "@playwright/test";
 
 import {
 	cacheControl,
 	contentSecurityPolicy,
+	documentBootstrapScriptHash,
 	documentContentSecurityPolicy,
 } from "../../apps/web/edge-contract";
-import { localeBootstrapScript } from "../../apps/web/src/i18n/bootstrap";
 import { parseRuntimeConfig } from "../../apps/web/src/lib/runtime-config";
 
 test("serves the runtime config artifact uncached with the strict schema", async ({
@@ -68,9 +66,7 @@ test("serves documents with the edge content security policy", async ({
 test("pins the script that vite injects into the document", async ({
 	request,
 }) => {
-	const digest = createHash("sha256")
-		.update(localeBootstrapScript(false))
-		.digest("base64");
+	const digest = documentBootstrapScriptHash(false);
 
 	const document = await request.get("/");
 	const scriptSource = (document.headers()["content-security-policy"] ?? "")
@@ -78,4 +74,5 @@ test("pins the script that vite injects into the document", async ({
 		.find((directive) => directive.startsWith("script-src "));
 
 	expect(scriptSource).toBe(`script-src 'self' 'sha256-${digest}'`);
+	expect(contentSecurityPolicy).toContain(`'sha256-${digest}'`);
 });

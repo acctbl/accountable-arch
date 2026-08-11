@@ -1,4 +1,13 @@
 {
+  "app.configurationUnavailable.message": {
+    "defaultMessage": "تعذّر على التطبيق تحميل إعدادات التشغيل العامة."
+  },
+  "app.configurationUnavailable.reload": {
+    "defaultMessage": "إعادة التحميل"
+  },
+  "app.configurationUnavailable.title": {
+    "defaultMessage": "الإعدادات غير متاحة"
+  },
   "errors.deadlineExceeded": {
     "defaultMessage": "استغرق الطلب وقتًا طويلًا جدًا لإكماله."
   },
@@ -40,5 +49,11 @@
   },
   "shell.reload": {
     "defaultMessage": "إعادة التحميل"
+  },
+  "themeSwitcher.toDark": {
+    "defaultMessage": "التبديل إلى المظهر الداكن"
+  },
+  "themeSwitcher.toLight": {
+    "defaultMessage": "التبديل إلى المظهر الفاتح"
   }
 }

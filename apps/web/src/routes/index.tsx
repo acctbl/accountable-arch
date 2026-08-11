@@ -1,22 +1,29 @@
+import { Button } from "@accountable/ui/components/button";
+import { PlusIcon } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { FormattedMessage, useIntl } from "react-intl";
 import { PRODUCT_NAME } from "@/brand";
+import { LocaleSwitcher } from "@/components/locale-switcher";
+import { ThemeSwitcher } from "@/components/theme-switcher";
 import { useApi } from "@/lib/api";
 import { formatApiError } from "@/lib/api-error";
-import { LocaleSwitcher } from "@/components/locale-switcher";
-import { Button } from "@accountable/ui/components/button";
-import { PlusIcon } from "@phosphor-icons/react";
 
 export const Route = createFileRoute("/")({ component: Home });
 
 function Home() {
-	const { system } = useApi();
+	const api = useApi();
 	const intl = useIntl();
 	const runtime = useQuery({
 		queryKey: ["system", "runtime"],
-		queryFn: () => system.getRuntime({}),
+		queryFn: () => {
+			if (!api) {
+				throw new Error("API clients are unavailable");
+			}
+			return api.system.getRuntime({});
+		},
+		enabled: api !== null,
 		retry: false,
 	});
 
@@ -30,8 +37,9 @@ function Home() {
 		<main id="main-content" className="flex min-h-svh" tabIndex={-1}>
 			<div className="min-w-0 space-y-2 p-6">
 				<h1 className="sr-only">{PRODUCT_NAME}</h1>
-				<div className="flex items-center">
+				<div className="flex items-center gap-1">
 					<LocaleSwitcher />
+					<ThemeSwitcher />
 					<Button
 						size="icon"
 						variant="ghost"
@@ -51,7 +59,7 @@ function Home() {
 				</p>
 
 				<p role="status" aria-live="polite" data-testid="runtime-status">
-					{runtime.isPending ? (
+					{api === null || runtime.isPending ? (
 						<FormattedMessage
 							id="runtime.loading"
 							defaultMessage="Connecting to the local API…"

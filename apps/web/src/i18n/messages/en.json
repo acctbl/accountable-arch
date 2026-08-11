@@ -1,4 +1,13 @@
 {
+  "app.configurationUnavailable.message": {
+    "defaultMessage": "The app could not load its public runtime configuration."
+  },
+  "app.configurationUnavailable.reload": {
+    "defaultMessage": "Reload"
+  },
+  "app.configurationUnavailable.title": {
+    "defaultMessage": "Configuration unavailable"
+  },
   "errors.deadlineExceeded": {
     "defaultMessage": "The request took too long to complete."
   },
@@ -40,5 +49,11 @@
   },
   "shell.reload": {
     "defaultMessage": "Reload"
+  },
+  "themeSwitcher.toDark": {
+    "defaultMessage": "Switch to dark appearance"
+  },
+  "themeSwitcher.toLight": {
+    "defaultMessage": "Switch to light appearance"
   }
 }
