@@ -45,3 +45,7 @@ output "oidc_provider_arn" {
 output "plan_role_arn" {
   value = module.github.plan_role_arn
 }
+
+output "observability_kms_key_arn" {
+  value = aws_kms_key.observability.arn
+}

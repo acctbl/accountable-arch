@@ -22,14 +22,16 @@ provider "aws" {
 module "observability" {
   source = "../../../modules/observability-root"
 
-  account_id                = "723225039926"
-  region                    = "eu-west-2"
-  environment               = "staging"
-  alert_email_addresses     = var.alert_email_addresses
-  translator_package_path   = var.translator_package_path
-  canary_package_path       = var.canary_package_path
-  runtime_log_group_name    = var.runtime_log_group_name
-  cells                     = var.cells
+  account_id              = "723225039926"
+  region                  = "eu-west-2"
+  environment             = "staging"
+  alert_email_addresses   = var.alert_email_addresses
+  translator_package_path = var.translator_package_path
+  canary_package_path     = var.canary_package_path
+  canary_active           = var.canary_active
+  cells = {
+    staging-01 = "arn:aws:ecs:eu-west-2:723225039926:cluster/accountable-staging-01"
+  }
   grafana_base_url          = var.grafana_base_url
   grafana_cloud_account_id  = var.grafana_cloud_account_id
   grafana_cloud_external_id = var.grafana_cloud_external_id

@@ -102,19 +102,22 @@ resource "grafana_dashboard" "environment" {
           uid  = "grafanacloud-acctbl-prom"
         }
         fieldConfig = { defaults = { unit = panel.unit }, overrides = [] }
-        targets = panel.expr == "" ? [{
-          refId      = "A"
-          namespace  = "Accountable/SLO"
-          metricName = "EligibleRequestCount"
-          statistic  = "Sum"
-          period     = "300"
-          region     = var.region
-          dimensions = { Environment = each.value.environment, ServiceName = "accountable-api" }
-          }] : [{
-          refId  = "A"
-          expr   = panel.expr
-          format = "time_series"
-        }]
+        targets = concat(
+          panel.expr == "" ? [{
+            refId      = "A"
+            namespace  = "Accountable/SLO"
+            metricName = "EligibleRequestCount"
+            statistic  = "Sum"
+            period     = "300"
+            region     = var.region
+            dimensions = { Environment = each.value.environment, ServiceName = "accountable-api" }
+          }] : [],
+          panel.expr != "" ? [{
+            refId  = "A"
+            expr   = panel.expr
+            format = "time_series"
+          }] : [],
+        )
       }
     ]
   })

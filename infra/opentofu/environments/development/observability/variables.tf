@@ -18,14 +18,8 @@ variable "capacity_package_path" {
   type        = string
 }
 
-variable "runtime_log_group_name" {
-  description = "Cell runtime log group that carries the safe stdout records"
-  type        = string
-}
-
-variable "cells" {
-  description = "Registered cell ID to its ECS cluster ARN"
-  type        = map(string)
+variable "canary_active" {
+  type = bool
 }
 
 variable "grafana_base_url" {

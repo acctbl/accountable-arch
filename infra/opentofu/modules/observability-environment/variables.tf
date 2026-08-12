@@ -61,6 +61,11 @@ variable "enable_capacity_producer" {
   default     = false
 }
 
+variable "canary_active" {
+  description = "Whether the external Grafana canary and its fail-closed alarm are active"
+  type        = bool
+}
+
 variable "grafana_capacity_cloud_token_parameter" {
   description = "Exact Parameter Store name of the Grafana Cloud API capacity token"
   type        = string
@@ -73,11 +78,6 @@ variable "grafana_capacity_stack_token_parameter" {
   type        = string
   default     = null
   nullable    = true
-}
-
-variable "runtime_log_group_name" {
-  description = "Cell runtime log group that carries the safe stdout records"
-  type        = string
 }
 
 variable "cells" {

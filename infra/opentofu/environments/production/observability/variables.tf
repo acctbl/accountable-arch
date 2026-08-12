@@ -1,8 +1,7 @@
 variable "alert_email_addresses" { type = list(string) }
 variable "translator_package_path" { type = string }
 variable "canary_package_path" { type = string }
-variable "runtime_log_group_name" { type = string }
-variable "cells" { type = map(string) }
+variable "canary_active" { type = bool }
 variable "grafana_base_url" { type = string }
 variable "grafana_cloud_account_id" { type = string }
 variable "grafana_cloud_external_id" { type = string }

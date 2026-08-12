@@ -15,6 +15,42 @@ module "github" {
   region                     = var.region
 }
 
+resource "aws_kms_key" "observability" {
+  description             = "Accountable ${var.environment} observability credentials, alerts, and logs"
+  deletion_window_in_days = 30
+  enable_key_rotation     = true
+  policy                  = data.aws_iam_policy_document.observability_key.json
+
+  lifecycle { prevent_destroy = true }
+}
+
+resource "aws_kms_alias" "observability" {
+  name          = "alias/accountable-${var.environment}-observability"
+  target_key_id = aws_kms_key.observability.key_id
+}
+
+data "aws_iam_policy_document" "observability_key" {
+  statement {
+    actions   = ["kms:*"]
+    resources = ["*"]
+
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${var.account_id}:root"]
+    }
+  }
+
+  statement {
+    actions   = ["kms:Decrypt", "kms:Describe*", "kms:Encrypt", "kms:GenerateDataKey*", "kms:ReEncrypt*"]
+    resources = ["*"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["cloudwatch.amazonaws.com", "events.amazonaws.com", "logs.${var.region}.amazonaws.com", "sns.amazonaws.com"]
+    }
+  }
+}
+
 resource "aws_ecr_repository" "application" {
   name                 = "accountable"
   image_tag_mutability = "IMMUTABLE"

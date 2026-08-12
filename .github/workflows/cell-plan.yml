@@ -130,10 +130,14 @@ jobs:
             production:production-01) account=576329195663 ;;
             *) echo "the cell does not belong to the selected environment" >&2; exit 2 ;;
           esac
-          desired=0
-          collector=1
-          if [[ "$ENVIRONMENT" != "development" ]]; then collector=2; fi
-          if [[ "$OPERATION" == "deploy" || "$OPERATION" == "converge" ]]; then desired="$collector"; fi
+          api_count=0
+          collector_count=0
+          service_count=1
+          if [[ "$ENVIRONMENT" != "development" ]]; then service_count=2; fi
+          if [[ "$OPERATION" == "deploy" || "$OPERATION" == "converge" ]]; then
+            api_count="$service_count"
+            collector_count="$service_count"
+          fi
           if [[ "$OPERATION" == "converge" && "${{ inputs.apply }}" == "true" ]]; then
             echo "a convergence proof cannot be applied" >&2
             exit 2
@@ -142,8 +146,8 @@ jobs:
           echo "AWS_PLAN_ROLE_ARN=arn:aws:iam::$account:role/accountable-$ENVIRONMENT-plan" >>"$GITHUB_ENV"
           echo "ROOT=infra/opentofu/environments/$ENVIRONMENT/cells/$CELL" >>"$GITHUB_ENV"
           echo "REGISTRY=$account.dkr.ecr.eu-west-2.amazonaws.com" >>"$GITHUB_ENV"
-          echo "DESIRED_COUNT=$desired" >>"$GITHUB_ENV"
-          echo "COLLECTOR_COUNT=$collector" >>"$GITHUB_ENV"
+          echo "DESIRED_COUNT=$api_count" >>"$GITHUB_ENV"
+          echo "COLLECTOR_COUNT=$collector_count" >>"$GITHUB_ENV"
 
       - name: Request branch-trusted plan identity
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0

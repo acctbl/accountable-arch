@@ -13,7 +13,7 @@ variable "enable_capacity_producer" {
   type    = bool
   default = false
 }
-variable "runtime_log_group_name" { type = string }
+variable "canary_active" { type = bool }
 variable "cells" { type = map(string) }
 variable "grafana_base_url" { type = string }
 variable "grafana_cloud_account_id" { type = string }

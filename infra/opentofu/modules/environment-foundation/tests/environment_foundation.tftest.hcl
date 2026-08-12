@@ -65,3 +65,21 @@ run "repository_is_immutable_and_scanned" {
     error_message = "The synthetic workload repository must be immutable and scanned."
   }
 }
+
+run "observability_key_precedes_runtime_credentials" {
+  command = plan
+
+  providers = {
+    aws = aws.mock
+  }
+
+  assert {
+    condition = (
+      aws_kms_key.observability.enable_key_rotation &&
+      aws_kms_key.observability.deletion_window_in_days == 30 &&
+      aws_kms_alias.observability.name == "alias/accountable-development-observability" &&
+      output.observability_kms_key_arn == aws_kms_key.observability.arn
+    )
+    error_message = "The durable environment foundation must own the rotating observability key before credentials are provisioned."
+  }
+}

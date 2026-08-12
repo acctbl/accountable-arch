@@ -49,3 +49,7 @@ output "synthetic_image_repository_arn" {
 output "synthetic_image_repository_url" {
   value = module.environment.synthetic_image_repository_url
 }
+
+output "observability_kms_key_arn" {
+  value = module.environment.observability_kms_key_arn
+}

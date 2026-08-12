@@ -13,6 +13,11 @@ on:
         required: true
         default: false
         type: boolean
+      canary_active:
+        description: Activate the external canary after the cell and Grafana stack are healthy
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   actions: read
@@ -128,8 +133,6 @@ jobs:
         env:
           TARGET: ${{ inputs.target }}
           ALERT_EMAILS: ${{ vars.ACCOUNTABLE_ALERT_EMAILS }}
-          CELLS: ${{ vars.ACCOUNTABLE_CELLS }}
-          RUNTIME_LOG_GROUP: ${{ vars.ACCOUNTABLE_RUNTIME_LOG_GROUP }}
           GRAFANA_STACK_URL: ${{ vars.ACCOUNTABLE_GRAFANA_STACK_URL }}
           GRAFANA_CLOUD_ACCOUNT_ID: ${{ vars.ACCOUNTABLE_GRAFANA_CLOUD_ACCOUNT_ID }}
           GRAFANA_CLOUD_EXTERNAL_ID: ${{ vars.ACCOUNTABLE_GRAFANA_CLOUD_EXTERNAL_ID }}
@@ -137,11 +140,9 @@ jobs:
         run: |
           set -euo pipefail
           emails="$(jq -cRn --arg value "$ALERT_EMAILS" '$value | split(",") | map(select(length > 0))')"
-          cells="$(jq -cRn --arg value "$CELLS" '$value | split(",") | map(select(length > 0) | split("=")) | map({(.[0]): .[1]}) | add // {}')"
           variables=(
             -var="alert_email_addresses=$emails"
-            -var="cells=$cells"
-            -var="runtime_log_group_name=$RUNTIME_LOG_GROUP"
+            -var="canary_active=${{ inputs.canary_active }}"
             -var="grafana_base_url=$GRAFANA_STACK_URL"
             -var="grafana_cloud_account_id=$GRAFANA_CLOUD_ACCOUNT_ID"
             -var="grafana_cloud_external_id=$GRAFANA_CLOUD_EXTERNAL_ID"
@@ -162,11 +163,16 @@ jobs:
           GRAFANA_STACK_URL: ${{ vars.ACCOUNTABLE_GRAFANA_STACK_URL }}
           GRAFANA_CLOUD_EXTERNAL_ID: ${{ vars.ACCOUNTABLE_GRAFANA_CLOUD_EXTERNAL_ID }}
           RUNBOOK_BASE_URL: ${{ vars.ACCOUNTABLE_RUNBOOK_BASE_URL }}
+          ACTIVE_ENVIRONMENTS: ${{ vars.ACCOUNTABLE_ACTIVE_OBSERVABILITY_ENVIRONMENTS }}
         run: |
           set -euo pipefail
           token="$(aws ssm get-parameter --name /accountable/observability/development/grafana-plan-token --with-decryption --query 'Parameter.Value' --output text)"
-          roles='{"development":"arn:aws:iam::453722413624:role/accountable-development-grafana-cloudwatch","staging":"arn:aws:iam::723225039926:role/accountable-staging-grafana-cloudwatch","production":"arn:aws:iam::576329195663:role/accountable-production-grafana-cloudwatch"}'
-          topics='{"development":{"critical":"arn:aws:sns:eu-west-2:453722413624:accountable-development-observability-critical","proof":"arn:aws:sns:eu-west-2:453722413624:accountable-development-observability-proof","warning":"arn:aws:sns:eu-west-2:453722413624:accountable-development-observability-warning"},"staging":{"critical":"arn:aws:sns:eu-west-2:723225039926:accountable-staging-observability-critical","proof":"arn:aws:sns:eu-west-2:723225039926:accountable-staging-observability-proof","warning":"arn:aws:sns:eu-west-2:723225039926:accountable-staging-observability-warning"},"production":{"critical":"arn:aws:sns:eu-west-2:576329195663:accountable-production-observability-critical","proof":"arn:aws:sns:eu-west-2:576329195663:accountable-production-observability-proof","warning":"arn:aws:sns:eu-west-2:576329195663:accountable-production-observability-warning"}}'
+          active="$(jq -cRn --arg value "$ACTIVE_ENVIRONMENTS" '$value | split(",") | map(select(length > 0)) | unique')"
+          jq -e 'length > 0 and all(. == "development" or . == "staging" or . == "production")' <<<"$active" >/dev/null
+          all_roles='{"development":"arn:aws:iam::453722413624:role/accountable-development-grafana-cloudwatch","staging":"arn:aws:iam::723225039926:role/accountable-staging-grafana-cloudwatch","production":"arn:aws:iam::576329195663:role/accountable-production-grafana-cloudwatch"}'
+          all_topics='{"development":{"critical":"arn:aws:sns:eu-west-2:453722413624:accountable-development-observability-critical","proof":"arn:aws:sns:eu-west-2:453722413624:accountable-development-observability-proof","warning":"arn:aws:sns:eu-west-2:453722413624:accountable-development-observability-warning"},"staging":{"critical":"arn:aws:sns:eu-west-2:723225039926:accountable-staging-observability-critical","proof":"arn:aws:sns:eu-west-2:723225039926:accountable-staging-observability-proof","warning":"arn:aws:sns:eu-west-2:723225039926:accountable-staging-observability-warning"},"production":{"critical":"arn:aws:sns:eu-west-2:576329195663:accountable-production-observability-critical","proof":"arn:aws:sns:eu-west-2:576329195663:accountable-production-observability-proof","warning":"arn:aws:sns:eu-west-2:576329195663:accountable-production-observability-warning"}}'
+          roles="$(jq -c --argjson active "$active" 'with_entries(select(.key as $key | $active | index($key)))' <<<"$all_roles")"
+          topics="$(jq -c --argjson active "$active" 'with_entries(select(.key as $key | $active | index($key)))' <<<"$all_topics")"
           mise exec -- tofu -chdir="$ROOT" init -input=false
           GRAFANA_AUTH="$token" mise exec -- tofu -chdir="$ROOT" plan -input=false -out="$RUNNER_TEMP/observability.plan" \
             -var="stack_url=$GRAFANA_STACK_URL" \

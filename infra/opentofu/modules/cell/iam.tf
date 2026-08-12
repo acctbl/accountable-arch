@@ -51,7 +51,7 @@ data "aws_iam_policy_document" "execution" {
 
   statement {
     actions   = local.execution_log_actions
-    resources = ["${aws_cloudwatch_log_group.runtime.arn}:*"]
+    resources = ["${local.runtime_log_group_arn}:*"]
   }
 
 }
@@ -109,7 +109,7 @@ data "aws_iam_policy_document" "synthetic_execution" {
 
   statement {
     actions   = local.execution_log_actions
-    resources = ["${aws_cloudwatch_log_group.runtime.arn}:*"]
+    resources = ["${local.runtime_log_group_arn}:*"]
   }
 
   statement {

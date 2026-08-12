@@ -145,3 +145,52 @@ run "state_access_is_account_scoped" {
     error_message = "State-key access must select keys in the target account through the environment alias."
   }
 }
+
+run "cell_key_authority_excludes_shared_keys" {
+  command = plan
+
+  assert {
+    condition = (
+      toset(local.cell_key_aliases) == toset([
+        "alias/accountable-development-01",
+        "alias/accountable-proof-01",
+      ]) &&
+      !contains(local.cell_key_aliases, "alias/accountable-development-observability") &&
+      !contains(local.cell_key_aliases, "alias/accountable-development-tofu-state") &&
+      toset([for alias in local.cell_key_aliases : trimprefix(alias, "alias/accountable-")]) == toset([
+        "development-01",
+        "proof-01",
+      ])
+    )
+    error_message = "Cell KMS authority must be limited to registered cell aliases and exclude shared infrastructure keys."
+  }
+
+  assert {
+    condition = (
+      anytrue([
+        for statement in data.aws_iam_policy_document.apply_cell.statement :
+        statement.sid == "CreateCellKeys" &&
+        toset(statement.actions) == toset(["kms:CreateKey"]) &&
+        toset(statement.resources) == toset(["*"])
+      ]) &&
+      anytrue([
+        for statement in data.aws_iam_policy_document.apply_cell.statement :
+        statement.sid == "TagNewCellKeys" &&
+        toset(statement.actions) == toset(["kms:TagResource"]) &&
+        toset(statement.resources) == toset(["arn:aws:kms:eu-west-2:453722413624:key/*"])
+      ]) &&
+      anytrue([
+        for statement in data.aws_iam_policy_document.apply_cell.statement :
+        statement.sid == "ManageRegisteredCellAliases" &&
+        toset(statement.actions) == toset(["kms:CreateAlias", "kms:DeleteAlias", "kms:UpdateAlias"]) &&
+        toset(statement.resources) == toset(local.cell_key_alias_arns)
+      ]) &&
+      alltrue([
+        for statement in data.aws_iam_policy_document.apply_cell.statement :
+        statement.sid != "ManageRegisteredCellAliases" ||
+        !contains(statement.resources, "arn:aws:kms:eu-west-2:453722413624:alias/accountable-development-observability")
+      ])
+    )
+    error_message = "Cell key creation, tagging, and alias management must be separate and limited to registered cell resources."
+  }
+}

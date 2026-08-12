@@ -59,12 +59,12 @@ variable "cell_id" {
 }
 
 variable "collector_desired_count" {
-  description = "Collector task count: one for development, two for staging and production"
+  description = "Collector task count for the current deployment phase"
   type        = number
 
   validation {
-    condition     = contains([1, 2], var.collector_desired_count)
-    error_message = "collector_desired_count must be one for development or two for highly available cells."
+    condition     = contains([0, 1, 2], var.collector_desired_count)
+    error_message = "collector_desired_count must be zero before token provisioning, one in development, or two in staging and production."
   }
 }
 

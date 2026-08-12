@@ -1,5 +1,5 @@
 locals {
-  environments = ["development", "staging", "production"]
+  environments = sort(keys(var.cloudwatch_role_arns))
 }
 
 resource "grafana_folder" "environment" {

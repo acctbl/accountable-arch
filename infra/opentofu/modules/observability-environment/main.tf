@@ -52,6 +52,22 @@ locals {
       source      = local.task_stop_sources[pair[1]].source
     }
   }
+
+  stdout_metric_filter_instances = {
+    for pair in setproduct(keys(var.cells), keys(local.stdout_metric_filters)) :
+    "${pair[0]}-${pair[1]}" => {
+      cell_id = pair[0]
+      filter  = local.stdout_metric_filters[pair[1]]
+    }
+  }
+}
+
+resource "aws_cloudwatch_log_group" "runtime" {
+  for_each = var.cells
+
+  name              = "/accountable/${each.key}"
+  retention_in_days = 30
+  kms_key_id        = var.kms_key_arn
 }
 
 resource "aws_sns_topic" "alarm_input" {
@@ -74,10 +90,7 @@ resource "aws_sns_topic" "translator_failure" {
 }
 
 data "aws_iam_policy_document" "cloudwatch_topic" {
-  for_each = {
-    alarm_input        = aws_sns_topic.alarm_input.arn
-    translator_failure = aws_sns_topic.translator_failure.arn
-  }
+  for_each = local.cloudwatch_topic_arns
 
   statement {
     actions   = ["sns:Publish"]
@@ -102,11 +115,18 @@ data "aws_iam_policy_document" "cloudwatch_topic" {
   }
 }
 
-resource "aws_sns_topic_policy" "cloudwatch" {
-  for_each = data.aws_iam_policy_document.cloudwatch_topic
+locals {
+  cloudwatch_topic_arns = {
+    alarm_input        = aws_sns_topic.alarm_input.arn
+    translator_failure = aws_sns_topic.translator_failure.arn
+  }
+}
 
-  arn    = each.key == "alarm_input" ? aws_sns_topic.alarm_input.arn : aws_sns_topic.translator_failure.arn
-  policy = each.value.json
+resource "aws_sns_topic_policy" "cloudwatch" {
+  for_each = local.cloudwatch_topic_arns
+
+  arn    = each.value
+  policy = data.aws_iam_policy_document.cloudwatch_topic[each.key].json
 }
 
 resource "aws_sns_topic_subscription" "email" {
@@ -287,7 +307,7 @@ resource "aws_sqs_queue_policy" "task_stop_dlq" {
 resource "aws_cloudwatch_event_rule" "task_stop" {
   for_each = local.task_stop_rules
 
-  name        = "${local.name}-${each.key}-task-stop"
+  name        = "accountable-${var.environment}-${each.key}-stop"
   description = "Unexpected ${each.value.service} task stop in ${each.value.cell_id}"
 
   # Only bounded stop codes, initiator classes, and exit status reach this rule.
@@ -448,18 +468,18 @@ resource "aws_cloudwatch_log_metric_filter" "collector_delivery_uncertain" {
 }
 
 resource "aws_cloudwatch_log_metric_filter" "stdout" {
-  for_each = local.stdout_metric_filters
+  for_each = local.stdout_metric_filter_instances
 
   name           = "${local.name}-${each.key}"
-  log_group_name = var.runtime_log_group_name
-  pattern        = "{ $.event_name = \"${each.value.event}\" }"
+  log_group_name = aws_cloudwatch_log_group.runtime[each.value.cell_id].name
+  pattern        = "{ $.event_name = \"${each.value.filter.event}\" }"
 
   metric_transformation {
-    name       = each.value.metric
-    namespace  = each.value.namespace
-    value      = try(each.value.value, "1")
+    name       = each.value.filter.metric
+    namespace  = each.value.filter.namespace
+    value      = try(each.value.filter.value, "1")
     unit       = "None"
-    dimensions = each.value.dimensions
+    dimensions = each.value.filter.dimensions
   }
 }
 
@@ -550,6 +570,7 @@ resource "aws_cloudwatch_event_rule" "canary" {
   name                = "${local.name}-canary"
   description         = "Grafana health canary"
   schedule_expression = "rate(5 minutes)"
+  state               = var.canary_active ? "ENABLED" : "DISABLED"
 }
 
 resource "aws_sqs_queue" "canary_dlq" {
@@ -600,6 +621,8 @@ resource "aws_lambda_permission" "canary" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "canary" {
+  count = var.canary_active ? 1 : 0
+
   alarm_name          = "${local.name}-canary"
   namespace           = "Accountable/Observability"
   metric_name         = "CanarySuccess"
@@ -917,9 +940,9 @@ resource "aws_cloudwatch_metric_alarm" "scheduled_delivery" {
 locals {
   emf_log_groups = merge(
     {
-      runtime = var.runtime_log_group_name
-      canary  = aws_cloudwatch_log_group.canary.name
+      canary = aws_cloudwatch_log_group.canary.name
     },
+    { for cell_id, log_group in aws_cloudwatch_log_group.runtime : "runtime-${cell_id}" => log_group.name },
     var.enable_capacity_producer ? { capacity = aws_cloudwatch_log_group.capacity[0].name } : {},
   )
 }

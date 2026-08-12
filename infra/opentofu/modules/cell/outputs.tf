@@ -89,7 +89,7 @@ output "web_identity" {
 }
 
 output "runtime_log_group_name" {
-  value = aws_cloudwatch_log_group.runtime.name
+  value = local.runtime_log_group_name
 }
 
 output "collector_service_name" {

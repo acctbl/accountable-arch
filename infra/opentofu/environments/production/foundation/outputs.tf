@@ -33,3 +33,7 @@ output "synthetic_repository_url" {
 output "plan_role_arn" {
   value = module.environment.plan_role_arn
 }
+
+output "observability_kms_key_arn" {
+  value = module.environment.observability_kms_key_arn
+}

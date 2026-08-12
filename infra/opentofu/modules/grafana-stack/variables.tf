@@ -3,8 +3,11 @@ variable "cloudwatch_role_arns" {
   type        = map(string)
 
   validation {
-    condition     = alltrue([for name in keys(var.cloudwatch_role_arns) : contains(["development", "staging", "production"], name)])
-    error_message = "cloudwatch_role_arns keys must be registered environments."
+    condition = (
+      contains(keys(var.cloudwatch_role_arns), "development") &&
+      alltrue([for name in keys(var.cloudwatch_role_arns) : contains(["development", "staging", "production"], name)])
+    )
+    error_message = "cloudwatch_role_arns must include development and may contain only registered environments."
   }
 }
 
@@ -28,6 +31,14 @@ variable "alert_topic_arns" {
       ])
     ])
     error_message = "alert_topic_arns must map every registered route to an exact Accountable SNS topic ARN."
+  }
+
+  validation {
+    condition = (
+      length(var.alert_topic_arns) > 0 &&
+      toset(keys(var.alert_topic_arns)) == toset(keys(var.cloudwatch_role_arns))
+    )
+    error_message = "alert_topic_arns and cloudwatch_role_arns must register the same active environments."
   }
 }
 

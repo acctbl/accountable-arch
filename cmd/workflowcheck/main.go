@@ -15,7 +15,9 @@ import (
 )
 
 const (
+	cellWorkflowPath       = ".github/workflows/cell-plan.yml"
 	foundationWorkflowPath = ".github/workflows/foundation-plan.yml"
+	observabilityPath      = ".github/workflows/observability-plan.yml"
 	proofWorkflowPath      = ".github/workflows/observability-proof.yml"
 	proofSchedulePath      = ".github/workflows/observability-proof-schedule.yml"
 	proofReusableWorkflow  = "./.github/workflows/observability-proof.yml"
@@ -98,7 +100,67 @@ func run(ctx context.Context, args []string) error {
 	if err := checkFoundationContract(); err != nil {
 		return err
 	}
+	if err := checkCellContract(); err != nil {
+		return err
+	}
+	if err := checkObservabilityContract(); err != nil {
+		return err
+	}
 	fmt.Println("check-workflows: every workflow and run block parses")
+	return nil
+}
+
+func checkObservabilityContract() error {
+	observability, content, err := parseWorkflow(observabilityPath)
+	if err != nil {
+		return err
+	}
+	inputs := observability.On.WorkflowDispatch.Inputs
+	if !sameKeys(inputs, []string{"target", "apply", "canary_active"}) {
+		return errors.New("observability dispatch inputs are incomplete or unexpected")
+	}
+	if !sameStrings(inputs["target"].Options, []string{"development", "staging", "production", "global"}) {
+		return errors.New("observability workflow must support every shared deployment target")
+	}
+	for _, fragment := range []string{
+		"ACCOUNTABLE_ACTIVE_OBSERVABILITY_ENVIRONMENTS",
+		`length > 0 and all(. == "development" or . == "staging" or . == "production")`,
+		`with_entries(select(.key as $key | $active | index($key)))`,
+	} {
+		if !bytes.Contains(content, []byte(fragment)) {
+			return fmt.Errorf("%s: missing active-environment contract fragment %q", observabilityPath, fragment)
+		}
+	}
+	return nil
+}
+
+func checkCellContract() error {
+	cell, content, err := parseWorkflow(cellWorkflowPath)
+	if err != nil {
+		return err
+	}
+	inputs := cell.On.WorkflowDispatch.Inputs
+	if !sameStrings(inputs["operation"].Options, []string{"create", "prepare", "deploy", "converge", "destroy"}) {
+		return errors.New("cell workflow must support every lifecycle operation")
+	}
+	plan, planExists := cell.Jobs["plan"]
+	apply, applyExists := cell.Jobs["apply"]
+	if !planExists || !applyExists || plan.Environment.Name != "" || apply.Environment.Name != "${{ inputs.environment }}" {
+		return errors.New("cell plan must be branch-trusted and apply must use the selected protected environment")
+	}
+	for _, fragment := range []string{
+		"api_count=0",
+		"collector_count=0",
+		`if [[ "$OPERATION" == "deploy" || "$OPERATION" == "converge" ]]`,
+		`echo "DESIRED_COUNT=$api_count"`,
+		`echo "COLLECTOR_COUNT=$collector_count"`,
+		`-var="api_desired_count=$DESIRED_COUNT"`,
+		`-var="collector_desired_count=$COLLECTOR_COUNT"`,
+	} {
+		if !bytes.Contains(content, []byte(fragment)) {
+			return fmt.Errorf("%s: missing zero-service bootstrap contract fragment %q", cellWorkflowPath, fragment)
+		}
+	}
 	return nil
 }
 

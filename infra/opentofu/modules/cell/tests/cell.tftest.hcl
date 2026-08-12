@@ -157,6 +157,35 @@ run "private_runtime_is_fail_closed" {
   }
 
   assert {
+    condition = (
+      local.runtime_log_group_name == "/accountable/development-01" &&
+      output.runtime_log_group_name == local.runtime_log_group_name &&
+      local.log_configuration.options["awslogs-group"] == local.runtime_log_group_name
+    )
+    error_message = "The cell must write only to its environment-owned runtime log group."
+  }
+
+  assert {
+    condition     = aws_kms_key.cell.tags["CellId"] == "development-01"
+    error_message = "The cell key must carry the immutable cell identity used by deployment authorization."
+  }
+
+  assert {
+    condition = (
+      local.cell_apply_role_arn == "arn:aws:iam::453722413624:role/accountable-development-apply" &&
+      aws_kms_key.cell.policy == data.aws_iam_policy_document.cell_key_bootstrap.json &&
+      anytrue([
+        for statement in data.aws_iam_policy_document.cell_key_bootstrap.statement :
+        statement.sid == "CellKeyAdministration" &&
+        contains(statement.actions, "kms:CreateAlias") &&
+        contains(statement.actions, "kms:PutKeyPolicy") &&
+        contains(flatten([for principal in statement.principals : principal.identifiers]), local.cell_apply_role_arn)
+      ])
+    )
+    error_message = "A new cell key must grant its exact environment apply role immediate administration without waiting for tag authorization to converge."
+  }
+
+  assert {
     condition = alltrue([
       for rule in aws_vpc_security_group_egress_rule.task_to_regional_endpoints :
       rule.ip_protocol == "tcp" && rule.from_port == 443 && rule.to_port == 443 &&
@@ -616,4 +645,30 @@ run "durable_database_requires_final_snapshot_name" {
   }
 
   expect_failures = [aws_db_instance.cell]
+}
+
+run "stopped_services_do_not_create_runtime_incidents" {
+  command = plan
+
+  providers = {
+    aws        = aws.regional
+    aws.global = aws.global
+  }
+
+  variables {
+    api_desired_count       = 0
+    collector_desired_count = 0
+  }
+
+  assert {
+    condition = (
+      aws_route53_health_check.public_api.disabled &&
+      alltrue([
+        for name in setunion(local.api_runtime_alarm_names, local.collector_runtime_alarm_names) :
+        !contains(keys(aws_cloudwatch_metric_alarm.standard), name)
+      ]) &&
+      length(aws_cloudwatch_metric_alarm.search) == 0
+    )
+    error_message = "A deliberately stopped cell must not create health checks or runtime alarms that report false incidents."
+  }
 }

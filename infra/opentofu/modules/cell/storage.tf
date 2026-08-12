@@ -2,6 +2,8 @@ resource "aws_kms_key" "cell" {
   description             = "Encrypts ${local.name} data, database, and runtime secrets"
   deletion_window_in_days = 7
   enable_key_rotation     = true
+  policy                  = data.aws_iam_policy_document.cell_key_bootstrap.json
+  tags                    = { CellId = var.cell_id }
 
   lifecycle {
     precondition {
@@ -11,12 +13,7 @@ resource "aws_kms_key" "cell" {
   }
 }
 
-resource "aws_kms_alias" "cell" {
-  name          = "alias/${local.name}"
-  target_key_id = aws_kms_key.cell.key_id
-}
-
-data "aws_iam_policy_document" "cell_key" {
+data "aws_iam_policy_document" "cell_key_bootstrap" {
   statement {
     sid       = "AccountRoot"
     actions   = ["kms:*"]
@@ -27,6 +24,42 @@ data "aws_iam_policy_document" "cell_key" {
       identifiers = ["arn:aws:iam::${var.account_id}:root"]
     }
   }
+
+  statement {
+    sid = "CellKeyAdministration"
+    actions = [
+      "kms:CreateAlias",
+      "kms:CreateGrant",
+      "kms:Decrypt",
+      "kms:DeleteAlias",
+      "kms:DescribeKey",
+      "kms:EnableKeyRotation",
+      "kms:GenerateDataKey",
+      "kms:GetKeyPolicy",
+      "kms:GetKeyRotationStatus",
+      "kms:ListResourceTags",
+      "kms:PutKeyPolicy",
+      "kms:ScheduleKeyDeletion",
+      "kms:TagResource",
+      "kms:UntagResource",
+      "kms:UpdateAlias",
+    ]
+    resources = ["*"]
+
+    principals {
+      type        = "AWS"
+      identifiers = [local.cell_apply_role_arn]
+    }
+  }
+}
+
+resource "aws_kms_alias" "cell" {
+  name          = "alias/${local.name}"
+  target_key_id = aws_kms_key.cell.key_id
+}
+
+data "aws_iam_policy_document" "cell_key" {
+  source_policy_documents = [data.aws_iam_policy_document.cell_key_bootstrap.json]
 
   statement {
     sid       = "CloudFrontWebRead"

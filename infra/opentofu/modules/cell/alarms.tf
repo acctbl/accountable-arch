@@ -1,6 +1,13 @@
 locals {
   alarm_severity = "critical"
   alarm_action   = var.environment == "production" ? "page" : "warning"
+  api_runtime_alarm_names = toset([
+    "api_task_count",
+    "alb_server_errors",
+    "alb_unhealthy",
+    "sli_heartbeat",
+  ])
+  collector_runtime_alarm_names = toset(["collector_task_count"])
 
   standard_alarms = merge(
     var.api_desired_count > 0 ? {
@@ -263,12 +270,19 @@ resource "aws_route53_health_check" "public_api" {
   request_interval  = 30
   failure_threshold = 3
   measure_latency   = true
+  disabled          = var.api_desired_count == 0
 
   tags = { Name = "${local.name}-public-api" }
 }
 
 resource "aws_cloudwatch_metric_alarm" "standard" {
-  for_each = local.standard_alarms
+  for_each = {
+    for name, alarm in local.standard_alarms : name => alarm
+    if(
+      (!contains(local.api_runtime_alarm_names, name) || var.api_desired_count > 0) &&
+      (!contains(local.collector_runtime_alarm_names, name) || var.collector_desired_count > 0)
+    )
+  }
 
   alarm_name          = "${local.name}-${replace(each.key, "_", "-")}"
   namespace           = each.value.namespace
@@ -293,7 +307,10 @@ resource "aws_cloudwatch_metric_alarm" "standard" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "search" {
-  for_each = local.search_alarms
+  for_each = {
+    for name, alarm in local.search_alarms : name => alarm
+    if name == "client_loss" ? var.api_desired_count > 0 : var.collector_desired_count > 0
+  }
 
   alarm_name          = "${local.name}-${replace(each.key, "_", "-")}"
   comparison_operator = each.value.comparison

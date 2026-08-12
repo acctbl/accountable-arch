@@ -75,16 +75,11 @@ resource "aws_ecs_cluster" "cell" {
   }
 }
 
-resource "aws_cloudwatch_log_group" "runtime" {
-  name              = "/accountable/${var.cell_id}"
-  retention_in_days = 30
-}
-
 locals {
   log_configuration = {
     logDriver = "awslogs"
     options = {
-      awslogs-group         = aws_cloudwatch_log_group.runtime.name
+      awslogs-group         = local.runtime_log_group_name
       awslogs-region        = data.aws_region.current.region
       awslogs-stream-prefix = "runtime"
     }

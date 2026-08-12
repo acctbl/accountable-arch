@@ -5,6 +5,13 @@ locals {
   state_bucket               = "accountable-tofu-state-${var.account_id}-${var.region}"
   state_key_alias            = "alias/accountable-${var.environment}-tofu-state"
   state_key_arn              = "arn:aws:kms:${var.region}:${var.account_id}:key/*"
+  cell_key_aliases = var.environment == "development" ? [
+    "alias/accountable-development-01",
+    "alias/accountable-proof-01",
+  ] : ["alias/accountable-${var.environment}-01"]
+  cell_key_alias_arns = [
+    for alias in local.cell_key_aliases : "arn:aws:kms:${var.region}:${var.account_id}:${alias}"
+  ]
 
   delivery_ecr_actions = [
     "ecr:BatchCheckLayerAvailability",
@@ -540,12 +547,8 @@ data "aws_iam_policy_document" "apply_cell" {
   }
 
   statement {
-    sid = "CreateCellKeys"
-    actions = [
-      "kms:CreateAlias",
-      "kms:CreateKey",
-      "kms:ListAliases",
-    ]
+    sid       = "CreateCellKeys"
+    actions   = ["kms:CreateKey"]
     resources = ["*"]
 
     condition {
@@ -553,62 +556,42 @@ data "aws_iam_policy_document" "apply_cell" {
       variable = "aws:RequestedRegion"
       values   = [var.region]
     }
-  }
-
-  statement {
-    sid = "ManageCellKeys"
-    actions = [
-      "kms:DeleteAlias",
-      "kms:DescribeKey",
-      "kms:EnableKeyRotation",
-      "kms:GetKeyPolicy",
-      "kms:GetKeyRotationStatus",
-      "kms:ListResourceTags",
-      "kms:PutKeyPolicy",
-      "kms:ScheduleKeyDeletion",
-      "kms:TagResource",
-      "kms:UntagResource",
-      "kms:UpdateAlias",
-    ]
-    resources = [
-      "arn:aws:kms:${var.region}:${var.account_id}:alias/accountable-*",
-      "arn:aws:kms:${var.region}:${var.account_id}:key/*",
-    ]
-  }
-
-  statement {
-    sid       = "GrantCellKeysToAWSResources"
-    actions   = ["kms:CreateGrant"]
-    resources = ["arn:aws:kms:${var.region}:${var.account_id}:key/*"]
 
     condition {
-      test     = "Bool"
-      variable = "kms:GrantIsForAWSResource"
-      values   = ["true"]
+      test     = "StringEquals"
+      variable = "aws:RequestTag/CellId"
+      values   = [for alias in local.cell_key_aliases : trimprefix(alias, "alias/accountable-")]
     }
   }
 
   statement {
-    sid = "UseCellKeysThroughAWSResources"
-    actions = [
-      "kms:Decrypt",
-      "kms:GenerateDataKey",
-    ]
+    sid       = "TagNewCellKeys"
+    actions   = ["kms:TagResource"]
     resources = ["arn:aws:kms:${var.region}:${var.account_id}:key/*"]
 
     condition {
       test     = "StringEquals"
-      variable = "kms:ViaService"
-      values = [
-        "logs.${var.region}.amazonaws.com",
-        "rds.${var.region}.amazonaws.com",
-        "s3.${var.region}.amazonaws.com",
-        "secretsmanager.${var.region}.amazonaws.com",
-        "sns.${var.region}.amazonaws.com",
-        "sqs.${var.region}.amazonaws.com",
-      ]
+      variable = "aws:RequestTag/CellId"
+      values   = [for alias in local.cell_key_aliases : trimprefix(alias, "alias/accountable-")]
     }
   }
+
+  statement {
+    sid       = "ListCellKeyAliases"
+    actions   = ["kms:ListAliases"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid = "ManageRegisteredCellAliases"
+    actions = [
+      "kms:CreateAlias",
+      "kms:DeleteAlias",
+      "kms:UpdateAlias",
+    ]
+    resources = local.cell_key_alias_arns
+  }
+
 }
 
 resource "aws_iam_policy" "apply_cell" {
