@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	proofWorkflowPath     = ".github/workflows/observability-proof.yml"
-	proofSchedulePath     = ".github/workflows/observability-proof-schedule.yml"
-	proofReusableWorkflow = "./.github/workflows/observability-proof.yml"
+	foundationWorkflowPath = ".github/workflows/foundation-plan.yml"
+	proofWorkflowPath      = ".github/workflows/observability-proof.yml"
+	proofSchedulePath      = ".github/workflows/observability-proof-schedule.yml"
+	proofReusableWorkflow  = "./.github/workflows/observability-proof.yml"
 )
 
 type workflow struct {
@@ -94,7 +95,42 @@ func run(ctx context.Context, args []string) error {
 			return err
 		}
 	}
+	if err := checkFoundationContract(); err != nil {
+		return err
+	}
 	fmt.Println("check-workflows: every workflow and run block parses")
+	return nil
+}
+
+func checkFoundationContract() error {
+	foundation, content, err := parseWorkflow(foundationWorkflowPath)
+	if err != nil {
+		return err
+	}
+	inputs := foundation.On.WorkflowDispatch.Inputs
+	if !sameKeys(inputs, []string{"environment", "apply"}) {
+		return errors.New("foundation dispatch inputs are incomplete or unexpected")
+	}
+	if !sameStrings(inputs["environment"].Options, []string{"development", "staging", "production"}) {
+		return errors.New("foundation workflow must support every deployment environment")
+	}
+	plan, planExists := foundation.Jobs["plan"]
+	apply, applyExists := foundation.Jobs["apply"]
+	if !planExists || !applyExists || plan.Environment.Name != "" || apply.Environment.Name != "${{ inputs.environment }}" {
+		return errors.New("foundation plan must be branch-trusted and apply must use the selected protected environment")
+	}
+	for _, fragment := range []string{
+		"accountable-$ENVIRONMENT-plan",
+		"accountable-$ENVIRONMENT-foundation-apply",
+		"foundation.plan.sha256",
+		"sha256sum --check foundation.plan.sha256",
+		`tofu -chdir="$ROOT" apply`,
+		`"$RUNNER_TEMP/foundation-plan/foundation.plan"`,
+	} {
+		if !bytes.Contains(content, []byte(fragment)) {
+			return fmt.Errorf("%s: missing contract fragment %q", foundationWorkflowPath, fragment)
+		}
+	}
 	return nil
 }
 

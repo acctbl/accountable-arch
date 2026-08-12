@@ -34,6 +34,10 @@ output "apply_role_arn" {
   value = module.github.apply_role_arn
 }
 
+output "foundation_apply_role_arn" {
+  value = module.github.foundation_apply_role_arn
+}
+
 output "oidc_provider_arn" {
   value = module.github.oidc_provider_arn
 }

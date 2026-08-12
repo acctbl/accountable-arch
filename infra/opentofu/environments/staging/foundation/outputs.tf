@@ -6,6 +6,10 @@ output "apply_role_arn" {
   value = module.environment.apply_role_arn
 }
 
+output "foundation_apply_role_arn" {
+  value = module.environment.foundation_apply_role_arn
+}
+
 output "image_repository_url" {
   value = module.environment.image_repository_url
 }

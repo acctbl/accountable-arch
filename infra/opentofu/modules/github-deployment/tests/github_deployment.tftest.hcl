@@ -36,8 +36,12 @@ run "plan_and_apply_trust_are_separate" {
   command = plan
 
   assert {
-    condition     = aws_iam_role.plan.name == "accountable-development-plan" && aws_iam_role.apply.name == "accountable-development-apply"
-    error_message = "Plan and apply must use separate roles."
+    condition = (
+      aws_iam_role.plan.name == "accountable-development-plan" &&
+      aws_iam_role.apply.name == "accountable-development-apply" &&
+      aws_iam_role.foundation_apply.name == "accountable-development-foundation-apply"
+    )
+    error_message = "Plan, runtime apply, and foundation apply must use separate roles."
   }
 
   assert {
@@ -53,10 +57,11 @@ run "plan_and_apply_trust_are_separate" {
           aws_iam_role_policy_attachment.apply_cell.policy_arn,
           aws_iam_role_policy_attachment.apply_edge.policy_arn,
           aws_iam_role_policy_attachment.apply_delivery.policy_arn,
-          aws_iam_role_policy_attachment.apply_foundation.policy_arn,
           aws_iam_role_policy_attachment.apply_observability.policy_arn,
         ] : policy_arn != "arn:aws:iam::aws:policy/PowerUserAccess"
-      ])
+      ]) &&
+      aws_iam_role_policy_attachment.apply_foundation.role == aws_iam_role.foundation_apply.name &&
+      aws_iam_role_policy_attachment.foundation_apply_read_only.policy_arn == "arn:aws:iam::aws:policy/ReadOnlyAccess"
     )
     error_message = "The plan role must remain read-only and the apply role must use only Accountable-managed policies."
   }
@@ -64,7 +69,9 @@ run "plan_and_apply_trust_are_separate" {
   assert {
     condition = (
       contains(local.plan_oidc_subjects, "repo:acctbl@309473689/accountable@1318144297:ref:refs/heads/main:workflow_ref:acctbl/accountable/.github/workflows/cell-plan.yml@refs/heads/main") &&
+      contains(local.plan_oidc_subjects, "repo:acctbl@309473689/accountable@1318144297:ref:refs/heads/main:workflow_ref:acctbl/accountable/.github/workflows/foundation-plan.yml@refs/heads/main") &&
       contains(local.apply_oidc_subjects, "repo:acctbl@309473689/accountable@1318144297:environment:development:workflow_ref:acctbl/accountable/.github/workflows/release.yml@refs/heads/main") &&
+      local.foundation_apply_oidc_subject == "repo:acctbl@309473689/accountable@1318144297:environment:development:workflow_ref:acctbl/accountable/.github/workflows/foundation-plan.yml@refs/heads/main" &&
       contains(local.promotion_oidc_subjects, "repo:acctbl@309473689/accountable@1318144297:environment:staging:workflow_ref:acctbl/accountable/.github/workflows/promotion.yml@refs/heads/main") &&
       alltrue([for subject in concat(local.plan_oidc_subjects, local.apply_oidc_subjects, local.promotion_oidc_subjects) : strcontains(subject, ":workflow_ref:")])
     )
@@ -97,6 +104,16 @@ run "apply_capabilities_match_the_workflows" {
       contains(local.observability_actions, "sqs:CreateQueue"),
     ])
     error_message = "The apply role must retain the image, runtime proof, web publish, invalidation, and ECS-only PassRole capabilities used by CI."
+  }
+
+  assert {
+    condition = (
+      aws_iam_role_policy.foundation_apply_state.role == aws_iam_role.foundation_apply.id &&
+      aws_iam_role_policy.foundation_apply_iam.role == aws_iam_role.foundation_apply.id &&
+      aws_iam_role_policy.apply_state.role == aws_iam_role.apply.id &&
+      aws_iam_role_policy.apply_iam.role == aws_iam_role.apply.id
+    )
+    error_message = "Foundation state and IAM management must stay on the isolated protected role."
   }
 
   assert {

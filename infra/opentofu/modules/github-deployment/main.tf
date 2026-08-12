@@ -1,9 +1,10 @@
 locals {
-  apply_role_name = "accountable-${var.environment}-apply"
-  plan_role_name  = "accountable-${var.environment}-plan"
-  state_bucket    = "accountable-tofu-state-${var.account_id}-${var.region}"
-  state_key_alias = "alias/accountable-${var.environment}-tofu-state"
-  state_key_arn   = "arn:aws:kms:${var.region}:${var.account_id}:key/*"
+  apply_role_name            = "accountable-${var.environment}-apply"
+  foundation_apply_role_name = "accountable-${var.environment}-foundation-apply"
+  plan_role_name             = "accountable-${var.environment}-plan"
+  state_bucket               = "accountable-tofu-state-${var.account_id}-${var.region}"
+  state_key_alias            = "alias/accountable-${var.environment}-tofu-state"
+  state_key_arn              = "arn:aws:kms:${var.region}:${var.account_id}:key/*"
 
   delivery_ecr_actions = [
     "ecr:BatchCheckLayerAvailability",
@@ -151,7 +152,7 @@ locals {
 
   workflow_ref_prefix = "${var.github_repository}/.github/workflows"
   plan_workflow_files = concat(
-    ["cell-plan.yml", "observability-plan.yml", "oidc-contract.yml"],
+    ["cell-plan.yml", "foundation-plan.yml", "observability-plan.yml", "oidc-contract.yml"],
     var.environment == "development" ? ["observability-proof.yml", "promotion.yml"] : [],
   )
   apply_workflow_files = concat(
@@ -179,6 +180,7 @@ locals {
     ] : var.environment == "staging" ? [
     "${var.github_oidc_subject_prefix}:environment:production:workflow_ref:${local.workflow_ref_prefix}/promotion.yml@refs/heads/main",
   ] : []
+  foundation_apply_oidc_subject = "${var.github_oidc_subject_prefix}:environment:${var.environment}:workflow_ref:${local.workflow_ref_prefix}/foundation-plan.yml@refs/heads/main"
 }
 
 resource "aws_iam_openid_connect_provider" "github" {
@@ -228,6 +230,29 @@ data "aws_iam_policy_document" "apply_assume" {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
       values   = concat(local.apply_oidc_subjects, local.promotion_oidc_subjects)
+    }
+  }
+}
+
+data "aws_iam_policy_document" "foundation_apply_assume" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = [local.foundation_apply_oidc_subject]
     }
   }
 }
@@ -290,6 +315,17 @@ resource "aws_iam_role" "apply" {
   name                 = local.apply_role_name
   assume_role_policy   = data.aws_iam_policy_document.apply_assume.json
   max_session_duration = 3600
+}
+
+resource "aws_iam_role" "foundation_apply" {
+  name                 = local.foundation_apply_role_name
+  assume_role_policy   = data.aws_iam_policy_document.foundation_apply_assume.json
+  max_session_duration = 3600
+}
+
+resource "aws_iam_role_policy_attachment" "foundation_apply_read_only" {
+  role       = aws_iam_role.foundation_apply.name
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
 }
 
 data "aws_iam_policy_document" "apply_cell" {
@@ -996,6 +1032,56 @@ data "aws_iam_policy_document" "apply_foundation" {
     ]
     resources = ["arn:aws:iam::${var.account_id}:oidc-provider/token.actions.githubusercontent.com"]
   }
+
+  statement {
+    sid = "ManageReleaseStorage"
+    actions = [
+      "s3:CreateBucket",
+      "s3:DeleteBucketPolicy",
+      "s3:GetBucketLocation",
+      "s3:GetBucketObjectLockConfiguration",
+      "s3:GetBucketOwnershipControls",
+      "s3:GetBucketPolicy",
+      "s3:GetBucketPublicAccessBlock",
+      "s3:GetBucketTagging",
+      "s3:GetBucketVersioning",
+      "s3:GetEncryptionConfiguration",
+      "s3:ListBucket",
+      "s3:PutBucketObjectLockConfiguration",
+      "s3:PutBucketOwnershipControls",
+      "s3:PutBucketPolicy",
+      "s3:PutBucketPublicAccessBlock",
+      "s3:PutBucketTagging",
+      "s3:PutBucketVersioning",
+      "s3:PutEncryptionConfiguration",
+    ]
+    resources = ["arn:aws:s3:::accountable-releases-${var.account_id}-${var.region}"]
+  }
+
+  statement {
+    sid = "ManageReleaseKey"
+    actions = [
+      "kms:CreateAlias",
+      "kms:CreateKey",
+      "kms:DescribeKey",
+      "kms:EnableKeyRotation",
+      "kms:GetKeyPolicy",
+      "kms:GetKeyRotationStatus",
+      "kms:ListAliases",
+      "kms:ListResourceTags",
+      "kms:PutKeyPolicy",
+      "kms:TagResource",
+      "kms:UntagResource",
+      "kms:UpdateAlias",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.region]
+    }
+  }
 }
 
 resource "aws_iam_policy" "apply_foundation" {
@@ -1013,7 +1099,7 @@ resource "aws_iam_policy" "apply_foundation" {
 }
 
 resource "aws_iam_role_policy_attachment" "apply_foundation" {
-  role       = aws_iam_role.apply.name
+  role       = aws_iam_role.foundation_apply.name
   policy_arn = aws_iam_policy.apply_foundation.arn
 }
 
@@ -1087,7 +1173,35 @@ resource "aws_iam_role_policy" "apply_state" {
   policy = data.aws_iam_policy_document.apply_state.json
 }
 
+resource "aws_iam_role_policy" "foundation_apply_state" {
+  name   = "accountable-state"
+  role   = aws_iam_role.foundation_apply.id
+  policy = data.aws_iam_policy_document.apply_state.json
+}
+
 data "aws_iam_policy_document" "apply_iam" {
+  statement {
+    sid    = "ProtectFoundationDeploymentIdentity"
+    effect = "Deny"
+    actions = [
+      "iam:AttachRolePolicy",
+      "iam:DeletePolicy",
+      "iam:DeletePolicyVersion",
+      "iam:DeleteRole",
+      "iam:DeleteRolePolicy",
+      "iam:DetachRolePolicy",
+      "iam:PutRolePolicy",
+      "iam:SetDefaultPolicyVersion",
+      "iam:UpdateAssumeRolePolicy",
+      "iam:UpdateRole",
+      "iam:UpdateRoleDescription",
+    ]
+    resources = [
+      "arn:aws:iam::${var.account_id}:role/${local.foundation_apply_role_name}",
+      "arn:aws:iam::${var.account_id}:policy/accountable-${var.environment}-foundation",
+    ]
+  }
+
   statement {
     sid = "ManageAccountableRuntimeRoles"
     actions = [
@@ -1168,5 +1282,11 @@ data "aws_iam_policy_document" "apply_iam" {
 resource "aws_iam_role_policy" "apply_iam" {
   name   = "accountable-runtime-iam"
   role   = aws_iam_role.apply.id
+  policy = data.aws_iam_policy_document.apply_iam.json
+}
+
+resource "aws_iam_role_policy" "foundation_apply_iam" {
+  name   = "accountable-foundation-iam"
+  role   = aws_iam_role.foundation_apply.id
   policy = data.aws_iam_policy_document.apply_iam.json
 }
