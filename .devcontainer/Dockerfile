@@ -13,9 +13,11 @@ RUN apt-get update \
 		build-essential \
 		ca-certificates \
 		curl \
+		docker.io \
 		fonts-freefont-ttf \
 		fonts-ipafont-gothic \
 		git \
+		jq \
 		sudo \
 		tar \
 		unzip \

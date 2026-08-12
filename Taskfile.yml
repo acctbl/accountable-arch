@@ -329,8 +329,18 @@ tasks:
             /workspaces/accountable/packages/proto/node_modules \
             /workspaces/accountable/packages/ui/node_modules
       - |
+        if socket_group="$(stat --format='%g' /var/run/docker.sock 2>/dev/null)"; then
+          :
+        else
+          socket_group="$(stat -f '%g' /var/run/docker.sock)"
+        fi
+        if [ "$(uname -s)" = "Darwin" ]; then
+          socket_group=0
+        fi
         docker run --rm \
+          --group-add "$socket_group" \
           --volume "{{.TASKFILE_DIR}}:/workspaces/accountable" \
+          --volume /var/run/docker.sock:/var/run/docker.sock \
           --volume accountable-devcontainer-home:/home/devcontainer \
           --volume accountable-devcontainer-node-modules:/workspaces/accountable/node_modules \
           --volume accountable-devcontainer-admin-node-modules:/workspaces/accountable/apps/admin/node_modules \

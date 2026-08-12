@@ -109,13 +109,23 @@ variable "grafana_instance_id" {
   }
 }
 
-variable "grafana_otlp_endpoint" {
-  description = "Grafana Cloud OTLP HTTP gateway endpoint for the cell"
+variable "grafana_otlp_private_dns" {
+  description = "Grafana Cloud OTLP PrivateLink DNS name for the cell"
   type        = string
 
   validation {
-    condition     = can(regex("^https://[^[:space:]/?#]+(/[^[:space:]?#]*)?$", var.grafana_otlp_endpoint))
-    error_message = "grafana_otlp_endpoint must be an HTTPS URL with no query or fragment."
+    condition     = can(regex("^[a-z0-9.-]+\\.grafana\\.net$", var.grafana_otlp_private_dns))
+    error_message = "grafana_otlp_private_dns must be a Grafana Cloud DNS name."
+  }
+}
+
+variable "grafana_otlp_private_link_service_name" {
+  description = "Grafana Cloud OTLP endpoint service name in the cell region"
+  type        = string
+
+  validation {
+    condition     = can(regex("^com\\.amazonaws\\.vpce\\.[a-z0-9-]+\\.vpce-svc-[a-f0-9]+$", var.grafana_otlp_private_link_service_name))
+    error_message = "grafana_otlp_private_link_service_name must be an AWS PrivateLink endpoint service name."
   }
 }
 

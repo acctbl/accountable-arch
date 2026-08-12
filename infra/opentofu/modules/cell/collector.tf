@@ -13,7 +13,7 @@ locals {
     aws_region            = data.aws_region.current.region
     parameter_path        = local.collector_parameter_path
     otlp_token_ref        = var.collector_otlp_token_ref
-    grafana_otlp_endpoint = var.grafana_otlp_endpoint
+    grafana_otlp_endpoint = "https://${var.grafana_otlp_private_dns}/otlp"
     grafana_instance_id   = var.grafana_instance_id
   })
 
@@ -108,17 +108,6 @@ resource "aws_vpc_security_group_egress_rule" "api_to_collector_sli" {
   referenced_security_group_id = aws_security_group.collector.id
   security_group_id            = aws_security_group.api.id
   to_port                      = local.collector_sli_port
-}
-
-# Grafana Cloud OTLP, Parameter Store, and CloudWatch Logs do not publish stable
-# shared destination prefixes.
-resource "aws_vpc_security_group_egress_rule" "collector_https" {
-  cidr_ipv4         = "0.0.0.0/0"
-  description       = "TLS access to Grafana Cloud and regional AWS APIs"
-  from_port         = 443
-  ip_protocol       = "tcp"
-  security_group_id = aws_security_group.collector.id
-  to_port           = 443
 }
 
 resource "aws_vpc_security_group_egress_rule" "collector_credentials" {

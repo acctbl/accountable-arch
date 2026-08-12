@@ -28,8 +28,11 @@ jobs:
         env:
           MISE_GITHUB_TOKEN: ${{ github.token }}
         run: |
+          socket_group="$(stat --format='%g' /var/run/docker.sock)"
           docker run --rm \
+            --group-add "$socket_group" \
             --volume "$GITHUB_WORKSPACE:/workspaces/accountable" \
+            --volume /var/run/docker.sock:/var/run/docker.sock \
             --workdir /workspaces/accountable \
             --env CI=1 \
             --env MISE_GITHUB_TOKEN \

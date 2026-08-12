@@ -349,12 +349,13 @@ resource "aws_wafv2_web_acl" "edge" {
 }
 
 resource "aws_cloudfront_distribution" "cell" {
+  anycast_ip_list_id  = var.synthetic_observation_enabled ? aws_cloudfront_anycast_ip_list.synthetic[0].id : null
   comment             = local.name
   default_root_object = "index.html"
   enabled             = true
   http_version        = "http2and3"
-  is_ipv6_enabled     = true
-  price_class         = "PriceClass_100"
+  is_ipv6_enabled     = !var.synthetic_observation_enabled
+  price_class         = var.synthetic_observation_enabled ? "PriceClass_All" : "PriceClass_100"
   web_acl_id          = aws_wafv2_web_acl.edge.arn
 
   origin {

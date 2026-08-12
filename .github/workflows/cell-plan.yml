@@ -62,7 +62,8 @@ env:
   AWS_REGION: eu-west-2
   AWS_DEFAULT_REGION: eu-west-2
   RELEASE_BUCKET: accountable-releases-453722413624-eu-west-2
-  GRAFANA_OTLP_ENDPOINT: https://otlp-gateway-prod-gb-south-1.grafana.net/otlp
+  GRAFANA_OTLP_PRIVATE_DNS: ${{ vars.ACCOUNTABLE_GRAFANA_OTLP_PRIVATE_DNS }}
+  GRAFANA_OTLP_PRIVATE_LINK_SERVICE_NAME: ${{ vars.ACCOUNTABLE_GRAFANA_OTLP_PRIVATE_LINK_SERVICE_NAME }}
 
 jobs:
   ci:
@@ -277,7 +278,8 @@ jobs:
             -var="image_uri=$image_uri" \
             -var="collector_image_uri=$collector_image_uri" \
             -var="collector_otlp_token_ref=${{ inputs.collector_otlp_token_ref }}" \
-            -var="grafana_otlp_endpoint=$GRAFANA_OTLP_ENDPOINT" \
+            -var="grafana_otlp_private_dns=$GRAFANA_OTLP_PRIVATE_DNS" \
+            -var="grafana_otlp_private_link_service_name=$GRAFANA_OTLP_PRIVATE_LINK_SERVICE_NAME" \
             -var="release_id=$release_id" \
             -var="release_manifest_digest=$MANIFEST_DIGEST" \
             -var="web_asset_digest=$web_digest" \

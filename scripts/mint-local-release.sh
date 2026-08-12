@@ -15,14 +15,7 @@ fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-local_release_id="$(python3 -c '
-import os, time, uuid
-raw = bytearray(os.urandom(16))
-raw[0:6] = int(time.time() * 1000).to_bytes(6, "big")
-raw[6] = (raw[6] & 0x0F) | 0x70
-raw[8] = (raw[8] & 0x3F) | 0x80
-print(str(uuid.UUID(bytes=bytes(raw))))
-')"
+local_release_id="$(go run ./cmd/release work-id)"
 
 go run ./cmd/release runtime-release \
 	--release-id "$local_release_id" \

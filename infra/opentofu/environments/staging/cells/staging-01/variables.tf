@@ -19,7 +19,8 @@ variable "collector_otlp_token_ref" {
     error_message = "collector_otlp_token_ref must select the active or standby token."
   }
 }
-variable "grafana_otlp_endpoint" { type = string }
+variable "grafana_otlp_private_dns" { type = string }
+variable "grafana_otlp_private_link_service_name" { type = string }
 variable "runbook_base_url" { type = string }
 variable "dashboard_base_url" { type = string }
 variable "release_id" { type = string }

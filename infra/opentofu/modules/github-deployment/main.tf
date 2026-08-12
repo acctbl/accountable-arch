@@ -644,6 +644,7 @@ data "aws_iam_policy_document" "apply_edge" {
   statement {
     sid = "CreateCellEdge"
     actions = [
+      "cloudfront:CreateAnycastIpList",
       "cloudfront:CreateCachePolicy",
       "cloudfront:CreateDistribution",
       "cloudfront:CreateDistributionWithTags",
@@ -652,6 +653,7 @@ data "aws_iam_policy_document" "apply_edge" {
       "cloudfront:CreateOriginRequestPolicy",
       "cloudfront:CreateResponseHeadersPolicy",
       "cloudfront:CreateVpcOrigin",
+      "cloudfront:ListAnycastIpLists",
       "cloudfront:ListCachePolicies",
       "cloudfront:ListDistributions",
       "cloudfront:ListFunctions",
@@ -666,6 +668,7 @@ data "aws_iam_policy_document" "apply_edge" {
   statement {
     sid = "ManageCellEdge"
     actions = [
+      "cloudfront:DeleteAnycastIpList",
       "cloudfront:DeleteCachePolicy",
       "cloudfront:DeleteDistribution",
       "cloudfront:DeleteFunction",
@@ -674,6 +677,7 @@ data "aws_iam_policy_document" "apply_edge" {
       "cloudfront:DeleteResponseHeadersPolicy",
       "cloudfront:DeleteVpcOrigin",
       "cloudfront:DescribeFunction",
+      "cloudfront:GetAnycastIpList",
       "cloudfront:GetCachePolicy",
       "cloudfront:GetDistribution",
       "cloudfront:GetDistributionConfig",
@@ -686,6 +690,7 @@ data "aws_iam_policy_document" "apply_edge" {
       "cloudfront:PublishFunction",
       "cloudfront:TagResource",
       "cloudfront:UntagResource",
+      "cloudfront:UpdateAnycastIpList",
       "cloudfront:UpdateCachePolicy",
       "cloudfront:UpdateDistribution",
       "cloudfront:UpdateFunction",

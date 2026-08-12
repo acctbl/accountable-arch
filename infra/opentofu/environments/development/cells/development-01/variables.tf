@@ -34,8 +34,13 @@ variable "collector_otlp_token_ref" {
   }
 }
 
-variable "grafana_otlp_endpoint" {
-  description = "Grafana Cloud OTLP HTTP gateway endpoint"
+variable "grafana_otlp_private_dns" {
+  description = "Grafana Cloud OTLP PrivateLink DNS name"
+  type        = string
+}
+
+variable "grafana_otlp_private_link_service_name" {
+  description = "Grafana Cloud OTLP PrivateLink endpoint service name"
   type        = string
 }
 

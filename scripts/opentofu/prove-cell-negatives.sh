@@ -34,7 +34,6 @@ tar -C "$source_root" \
 
 cell_root="$proof_source/environments/development/cells/development-01"
 module_root="$proof_source/modules/cell"
-cp "$proof_source/.terraform.lock.hcl" "$cell_root/.terraform.lock.hcl"
 
 unset AWS_PROFILE AWS_ROLE_ARN AWS_WEB_IDENTITY_TOKEN_FILE AWS_SESSION_TOKEN AWS_SECURITY_TOKEN
 export AWS_ACCESS_KEY_ID="offline-test"
@@ -102,6 +101,9 @@ strip_lifecycle_guards
 sed 's/data\.aws_ec2_managed_prefix_list\.cloudfront\.id/"pl-12345678"/' \
 	"$module_root/security.tf" >"$module_root/security.tf.offline"
 mv "$module_root/security.tf.offline" "$module_root/security.tf"
+sed 's/data\.aws_ec2_managed_prefix_list\.s3\.id/"pl-87654321"/' \
+	"$module_root/network.tf" >"$module_root/network.tf.offline"
+mv "$module_root/network.tf.offline" "$module_root/network.tf"
 
 remove_hcl_block() {
 	local file="$1"
@@ -126,6 +128,7 @@ remove_hcl_block() {
 
 remove_hcl_block "$module_root/locals.tf" '^data "aws_caller_identity" "current"'
 remove_hcl_block "$module_root/security.tf" '^data "aws_ec2_managed_prefix_list" "cloudfront"'
+remove_hcl_block "$module_root/network.tf" '^data "aws_ec2_managed_prefix_list" "s3"'
 
 tofu -chdir="$cell_root" init -input=false -lockfile=readonly >/dev/null
 
@@ -137,7 +140,8 @@ plan_args=(
 	-var="configuration_revision=negative-proof"
 	-var="image_uri=453722413624.dkr.ecr.eu-west-2.amazonaws.com/accountable@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	-var="collector_image_uri=453722413624.dkr.ecr.eu-west-2.amazonaws.com/accountable-collector@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	-var="grafana_otlp_endpoint=https://otlp-gateway-prod-gb-south-1.grafana.net/otlp"
+	-var="grafana_otlp_private_dns=otlp-gateway-prod-gb-south-1.private-link.grafana.net"
+	-var="grafana_otlp_private_link_service_name=com.amazonaws.vpce.eu-west-2.vpce-svc-0123456789abcdef0"
 	-var="runbook_base_url=https://github.com/acctbl/accountable/tree/main/docs/runbooks"
 	-var="dashboard_base_url=https://acctbl.grafana.net"
 	-var="release_id=018f47d2-7f00-7abc-8def-1234567890ab"

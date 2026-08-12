@@ -24,10 +24,12 @@ func main() {
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New(
-			"usage: release <produce|verify|web-manifest|extract-web|verify-web|web-release|runtime-release> [flags]",
+			"usage: release <work-id|produce|verify|web-manifest|extract-web|verify-web|web-release|runtime-release> [flags]",
 		)
 	}
 	switch args[0] {
+	case "work-id":
+		return workID(args[1:])
 	case "produce":
 		return produce(args[1:])
 	case "verify":
@@ -45,6 +47,18 @@ func run(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown release command %q", args[0])
 	}
+}
+
+func workID(args []string) error {
+	if len(args) != 0 {
+		return errors.New("work-id does not accept arguments")
+	}
+	workID, err := telemetry.NewWorkID()
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(os.Stdout, workID)
+	return err
 }
 
 func extractWeb(args []string) error {

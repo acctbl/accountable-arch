@@ -84,30 +84,38 @@ mock_provider "aws" {
 
 mock_provider "aws" {
   alias = "global"
+
+  mock_resource "aws_cloudfront_anycast_ip_list" {
+    defaults = {
+      anycast_ips = ["192.0.2.1", "192.0.2.2", "192.0.2.3", "192.0.2.4", "192.0.2.5", "192.0.2.6", "192.0.2.7", "192.0.2.8", "192.0.2.9", "192.0.2.10", "192.0.2.11", "192.0.2.12", "192.0.2.13", "192.0.2.14", "192.0.2.15", "192.0.2.16", "192.0.2.17", "192.0.2.18", "192.0.2.19", "192.0.2.20", "192.0.2.21"]
+      id          = "aipl-1234567890abcdef0"
+    }
+  }
 }
 
 variables {
-  account_id                     = "453722413624"
-  alarm_input_topic_arn          = "arn:aws:sns:eu-west-2:453722413624:accountable-development-observability-alarm-input"
-  runbook_base_url               = "https://github.com/acctbl/accountable/tree/main/docs/runbooks/observability"
-  dashboard_base_url             = "https://acctbl.grafana.net"
-  api_desired_count              = 1
-  availability_zones             = ["eu-west-2a", "eu-west-2b"]
-  cell_id                        = "development-01"
-  configuration_revision         = "proof"
-  cell_lifecycle                 = "ephemeral"
-  collector_desired_count        = 1
-  collector_image_repository_arn = "arn:aws:ecr:eu-west-2:453722413624:repository/accountable-collector"
-  collector_image_uri            = "453722413624.dkr.ecr.eu-west-2.amazonaws.com/accountable-collector@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-  grafana_instance_id            = "1765140"
-  grafana_otlp_endpoint          = "https://otlp-gateway-prod-gb-south-1.grafana.net/otlp"
-  environment                    = "development"
-  image_repository_arn           = "arn:aws:ecr:eu-west-2:453722413624:repository/accountable"
-  image_uri                      = "453722413624.dkr.ecr.eu-west-2.amazonaws.com/accountable@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-  release_id                     = "018f47d2-7f00-7abc-8def-1234567890ab"
-  release_manifest_digest        = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-  web_asset_digest               = "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-  vpc_cidr                       = "10.20.0.0/16"
+  account_id                             = "453722413624"
+  alarm_input_topic_arn                  = "arn:aws:sns:eu-west-2:453722413624:accountable-development-observability-alarm-input"
+  runbook_base_url                       = "https://github.com/acctbl/accountable/tree/main/docs/runbooks/observability"
+  dashboard_base_url                     = "https://acctbl.grafana.net"
+  api_desired_count                      = 1
+  availability_zones                     = ["eu-west-2a", "eu-west-2b"]
+  cell_id                                = "development-01"
+  configuration_revision                 = "proof"
+  cell_lifecycle                         = "ephemeral"
+  collector_desired_count                = 1
+  collector_image_repository_arn         = "arn:aws:ecr:eu-west-2:453722413624:repository/accountable-collector"
+  collector_image_uri                    = "453722413624.dkr.ecr.eu-west-2.amazonaws.com/accountable-collector@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  grafana_instance_id                    = "1765140"
+  grafana_otlp_private_dns               = "otlp-gateway-prod-gb-south-1.private-link.grafana.net"
+  grafana_otlp_private_link_service_name = "com.amazonaws.vpce.eu-west-2.vpce-svc-0123456789abcdef0"
+  environment                            = "development"
+  image_repository_arn                   = "arn:aws:ecr:eu-west-2:453722413624:repository/accountable"
+  image_uri                              = "453722413624.dkr.ecr.eu-west-2.amazonaws.com/accountable@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  release_id                             = "018f47d2-7f00-7abc-8def-1234567890ab"
+  release_manifest_digest                = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  web_asset_digest                       = "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  vpc_cidr                               = "10.20.0.0/16"
 }
 
 run "private_runtime_is_fail_closed" {
@@ -150,10 +158,33 @@ run "private_runtime_is_fail_closed" {
 
   assert {
     condition = alltrue([
-      for rule in aws_vpc_security_group_egress_rule.runtime_https :
-      rule.ip_protocol == "tcp" && rule.from_port == 443 && rule.to_port == 443
+      for rule in aws_vpc_security_group_egress_rule.task_to_regional_endpoints :
+      rule.ip_protocol == "tcp" && rule.from_port == 443 && rule.to_port == 443 &&
+      rule.referenced_security_group_id == aws_security_group.regional_endpoints.id
     ])
-    error_message = "Public runtime egress must be restricted to TLS."
+    error_message = "Task access to regional AWS APIs must use the private endpoint security group."
+  }
+
+  assert {
+    condition = (
+      length(aws_vpc_security_group_egress_rule.task_to_dns_tcp) == 4 &&
+      length(aws_vpc_security_group_egress_rule.task_to_dns_udp) == 4 &&
+      alltrue([
+        for rule in concat(
+          values(aws_vpc_security_group_egress_rule.task_to_dns_tcp),
+          values(aws_vpc_security_group_egress_rule.task_to_dns_udp),
+        ) : rule.cidr_ipv4 == "10.20.0.2/32" && rule.from_port == 53 && rule.to_port == 53
+      ])
+    )
+    error_message = "Every task must reach only the VPC DNS resolver."
+  }
+
+  assert {
+    condition = (
+      aws_vpc_security_group_egress_rule.collector_to_grafana_otlp.referenced_security_group_id == aws_security_group.grafana_otlp.id &&
+      aws_vpc_endpoint.grafana_otlp.private_dns_enabled
+    )
+    error_message = "Collector export must use the Grafana Cloud PrivateLink endpoint."
   }
 
   assert {
@@ -299,6 +330,16 @@ run "staging_runs_one_continuous_signed_synthetic_workload" {
       !one(aws_ecs_service.synthetic).network_configuration[0].assign_public_ip
     )
     error_message = "Staging must run exactly one private continuous synthetic workload."
+  }
+
+  assert {
+    condition = (
+      one(aws_cloudfront_anycast_ip_list.synthetic).ip_count == 21 &&
+      length(aws_vpc_security_group_egress_rule.synthetic_to_edge) == 21 &&
+      aws_cloudfront_distribution.cell.price_class == "PriceClass_All" &&
+      !aws_cloudfront_distribution.cell.is_ipv6_enabled
+    )
+    error_message = "Staging synthetic traffic must use the 21-address CloudFront firewall allowlist contract."
   }
 
   assert {

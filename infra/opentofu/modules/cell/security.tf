@@ -121,24 +121,6 @@ resource "aws_vpc_security_group_ingress_rule" "bootstrap_to_database" {
   }
 }
 
-# Regional AWS APIs do not publish stable shared destination prefixes. Closing this
-# rule requires interface endpoints for SSM, KMS, ECR, and CloudWatch Logs.
-#trivy:ignore:AVD-AWS-0104:exp:2026-11-05
-resource "aws_vpc_security_group_egress_rule" "runtime_https" {
-  for_each = {
-    api       = aws_security_group.api.id
-    bootstrap = aws_security_group.bootstrap.id
-    migrate   = aws_security_group.migrate.id
-  }
-
-  cidr_ipv4         = "0.0.0.0/0"
-  description       = "TLS access to regional AWS APIs"
-  from_port         = 443
-  ip_protocol       = "tcp"
-  security_group_id = each.value
-  to_port           = 443
-}
-
 resource "aws_vpc_security_group_egress_rule" "runtime_credentials" {
   for_each = {
     api       = aws_security_group.api.id

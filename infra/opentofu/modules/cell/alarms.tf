@@ -160,6 +160,8 @@ locals {
         summary     = "RDS write latency is sustained above 100 milliseconds"
         recovery    = "write latency remains below 100 milliseconds for 15 minutes"
       }
+    },
+    var.synthetic_observation_enabled ? {
       nat_ports = {
         namespace   = "AWS/NATGateway"
         metric      = "ErrorPortAllocation"
@@ -169,12 +171,12 @@ locals {
         period      = 300
         evaluations = 1
         missing     = "notBreaching"
-        dimensions  = { NatGatewayId = aws_nat_gateway.cell.id }
+        dimensions  = { NatGatewayId = aws_nat_gateway.cell[0].id }
         signal      = "nat.port_allocation"
         summary     = "The NAT gateway could not allocate an outbound port"
         recovery    = "port-allocation errors remain zero for 5 minutes"
       }
-    },
+    } : {},
     var.cell_lifecycle == "durable" ? {
       backup_failure = {
         namespace   = "AWS/Backup"

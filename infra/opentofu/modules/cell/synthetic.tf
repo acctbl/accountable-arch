@@ -10,11 +10,19 @@ resource "aws_security_group" "synthetic" {
   vpc_id      = aws_vpc.cell.id
 }
 
-resource "aws_vpc_security_group_egress_rule" "synthetic_https" {
-  count = var.synthetic_observation_enabled ? 1 : 0
+resource "aws_cloudfront_anycast_ip_list" "synthetic" {
+  provider = aws.global
+  count    = var.synthetic_observation_enabled ? 1 : 0
 
-  cidr_ipv4         = "0.0.0.0/0"
-  description       = "TLS access to the public cell edge and regional AWS APIs"
+  ip_count = 21
+  name     = "${local.name}-synthetic"
+}
+
+resource "aws_vpc_security_group_egress_rule" "synthetic_to_edge" {
+  count = var.synthetic_observation_enabled ? 21 : 0
+
+  cidr_ipv4         = "${aws_cloudfront_anycast_ip_list.synthetic[0].anycast_ips[count.index]}/32"
+  description       = "TLS access to the cell CloudFront Anycast address"
   from_port         = 443
   ip_protocol       = "tcp"
   security_group_id = aws_security_group.synthetic[0].id

@@ -23,20 +23,31 @@ fi
 TEST_POSTGRES_PASSWORD="accountable-local-test-only"
 TEST_POSTGRES_DATABASE="accountable"
 POSTGRES_CONTAINER="accountable-postgres-test-$$"
+POSTGRES_NETWORK_CONTAINER="${ACCOUNTABLE_TEST_POSTGRES_NETWORK_CONTAINER:-}"
 
 cleanup() {
 	docker rm --force "$POSTGRES_CONTAINER" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
-docker run --detach --rm \
-	--name "$POSTGRES_CONTAINER" \
-	--env POSTGRES_PASSWORD="$TEST_POSTGRES_PASSWORD" \
-	--env POSTGRES_DB="$TEST_POSTGRES_DATABASE" \
-	--publish 127.0.0.1::5432 \
-	"$POSTGRES_TEST_IMAGE" >/dev/null
+postgres_run_args=(
+	--detach
+	--rm
+	--name "$POSTGRES_CONTAINER"
+	--env POSTGRES_PASSWORD="$TEST_POSTGRES_PASSWORD"
+	--env POSTGRES_DB="$TEST_POSTGRES_DATABASE"
+)
+if [[ -n "$POSTGRES_NETWORK_CONTAINER" ]]; then
+	postgres_run_args+=(--network "container:$POSTGRES_NETWORK_CONTAINER")
+	POSTGRES_PORT="5432"
+else
+	postgres_run_args+=(--publish 127.0.0.1::5432)
+fi
+docker run "${postgres_run_args[@]}" "$POSTGRES_TEST_IMAGE" >/dev/null
 
-POSTGRES_PORT="$(docker inspect --format '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}' "$POSTGRES_CONTAINER")"
+if [[ -z "$POSTGRES_NETWORK_CONTAINER" ]]; then
+	POSTGRES_PORT="$(docker inspect --format '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}' "$POSTGRES_CONTAINER")"
+fi
 POSTGRES_READY="false"
 for _ in $(seq 1 300); do
 	if docker exec "$POSTGRES_CONTAINER" pg_isready --host 127.0.0.1 --username postgres --dbname "$TEST_POSTGRES_DATABASE" >/dev/null 2>&1; then
