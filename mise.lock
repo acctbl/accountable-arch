@@ -386,23 +386,23 @@ version = "1.8.0"
 backend = "http:tla-plus"
 
 [tools."http:tla-plus"."platforms.linux-arm64"]
-checksum = "sha256:e22f8ffb4bacdea0a871f444dd94fe5fb0d8013b3388ae39e82e26f852c735d5"
+checksum = "sha256:ab323b79802aedc3203b3f9af37c6aca3ed43f4e0225b36f2aa77b26de46c05f"
 url = "https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar"
 
 [tools."http:tla-plus"."platforms.linux-x64"]
-checksum = "sha256:e22f8ffb4bacdea0a871f444dd94fe5fb0d8013b3388ae39e82e26f852c735d5"
+checksum = "sha256:ab323b79802aedc3203b3f9af37c6aca3ed43f4e0225b36f2aa77b26de46c05f"
 url = "https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar"
 
 [tools."http:tla-plus"."platforms.macos-arm64"]
-checksum = "sha256:e22f8ffb4bacdea0a871f444dd94fe5fb0d8013b3388ae39e82e26f852c735d5"
+checksum = "sha256:ab323b79802aedc3203b3f9af37c6aca3ed43f4e0225b36f2aa77b26de46c05f"
 url = "https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar"
 
 [tools."http:tla-plus"."platforms.macos-x64"]
-checksum = "sha256:e22f8ffb4bacdea0a871f444dd94fe5fb0d8013b3388ae39e82e26f852c735d5"
+checksum = "sha256:ab323b79802aedc3203b3f9af37c6aca3ed43f4e0225b36f2aa77b26de46c05f"
 url = "https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar"
 
 [tools."http:tla-plus"."platforms.windows-x64"]
-checksum = "sha256:e22f8ffb4bacdea0a871f444dd94fe5fb0d8013b3388ae39e82e26f852c735d5"
+checksum = "sha256:ab323b79802aedc3203b3f9af37c6aca3ed43f4e0225b36f2aa77b26de46c05f"
 url = "https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar"
 
 [[tools.java]]
