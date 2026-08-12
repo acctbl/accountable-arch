@@ -1,0 +1,211 @@
+extensions:
+  basicauth/grafana:
+    client_auth:
+      username: {{ q .GrafanaInstanceID }}
+      password: {{ q .GrafanaToken }}
+receivers:
+  otlp/app:
+    protocols:
+      http:
+        endpoint: {{ .ApplicationEndpoint }}
+  otlp/slo:
+    protocols:
+      http:
+        endpoint: {{ .SLIEndpoint }}
+  prometheus/internal:
+    config:
+      scrape_configs:
+        - job_name: collector
+          scrape_interval: 30s
+          static_configs:
+            - targets: [{{ q .InternalMetricsEndpoint }}]
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 15
+  batch:
+  filter/identity:
+    error_mode: ignore
+    traces:
+      span:
+{{- range .IdentityConflictConditions }}
+        - {{ q . }}
+{{- end }}
+    metrics:
+      datapoint:
+{{- range .IdentityConflictConditions }}
+        - {{ q . }}
+{{- end }}
+    logs:
+      log_record:
+{{- range .IdentityConflictConditions }}
+        - {{ q . }}
+{{- end }}
+  transform/identity:
+    error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements:
+{{- range .TrustedIdentityStatements }}
+          - {{ q . }}
+{{- end }}
+    metric_statements:
+      - context: resource
+        statements:
+{{- range .TrustedIdentityStatements }}
+          - {{ q . }}
+{{- end }}
+    log_statements:
+      - context: resource
+        statements:
+{{- range .TrustedIdentityStatements }}
+          - {{ q . }}
+{{- end }}
+  transform/allowlist:
+    error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements:
+          - {{ q .ResourceKeepKeys }}
+      - context: scope
+        statements:
+          - {{ q .ScopeKeepKeys }}
+      - context: span
+        statements:
+          - {{ q .SpanKeepKeys }}
+    log_statements:
+      - context: resource
+        statements:
+          - {{ q .ResourceKeepKeys }}
+      - context: scope
+        statements:
+          - {{ q .ScopeKeepKeys }}
+      - context: log
+        statements:
+          - {{ q .LogKeepKeys }}
+    metric_statements:
+      - context: resource
+        statements:
+          - {{ q .ResourceKeepKeys }}
+      - context: scope
+        statements:
+          - {{ q .ScopeKeepKeys }}
+      - context: datapoint
+        statements:
+          - {{ q .MetricKeepKeys }}
+  transform/runtime_identity_labels:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+{{- range .RuntimeIdentityCopyStatements }}
+          - {{ q . }}
+{{- end }}
+  filter/sli:
+    error_mode: ignore
+    metrics:
+      metric:
+{{- range .SLIMetricRejections }}
+        - {{ q . }}
+{{- end }}
+      datapoint:
+{{- range .SLIDatapointRejections }}
+        - {{ q . }}
+{{- end }}
+  transform/sli:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        statements:
+{{- range .SLIRenameStatements }}
+          - {{ q . }}
+{{- end }}
+      - context: datapoint
+        statements:
+{{- range .SLIDimensionStatements }}
+          - {{ q . }}
+{{- end }}
+  filter/internal:
+    error_mode: ignore
+    metrics:
+      metric:
+        - {{ q .InternalMetricRejection }}
+  transform/internal:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+{{- range .InternalDimensionStatements }}
+          - {{ q . }}
+{{- end }}
+      - context: metric
+        statements:
+{{- range .InternalRenameStatements }}
+          - {{ q . }}
+{{- end }}
+exporters:
+  accountable_delivery/grafana:
+    endpoint: {{ .GrafanaOTLPEndpoint }}
+    auth:
+      authenticator: basicauth/grafana
+    environment: {{ .Environment }}
+    cell_id: {{ .CellID }}
+    collector_task_id: {{ .CollectorTaskID }}
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 60s
+    sending_queue:
+      enabled: true
+      sizer: items
+      queue_size: 10000
+  accountable_emf/sli:
+    region: {{ .AWSRegion }}
+    mode: sli
+    namespace: {{ .SLONamespace }}
+    log_group_name: {{ .SLILogGroup }}
+    log_stream_name: {{ .CollectorTaskID }}
+    environment: {{ .Environment }}
+    cell_id: {{ .CellID }}
+  accountable_emf/internal:
+    region: {{ .AWSRegion }}
+    mode: internal
+    namespace: {{ .CollectorNamespace }}
+    log_group_name: {{ .InternalLogGroup }}
+    log_stream_name: {{ .CollectorTaskID }}
+    environment: {{ .Environment }}
+    cell_id: {{ .CellID }}
+service:
+  extensions: [basicauth/grafana]
+  telemetry:
+    logs:
+      encoding: json
+    metrics:
+      level: normal
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: {{ q .InternalMetricsHost }}
+                port: {{ .InternalMetricsPort }}
+  pipelines:
+    traces/app:
+      receivers: [otlp/app]
+      processors: [memory_limiter, filter/identity, transform/identity, transform/allowlist, batch]
+      exporters: [accountable_delivery/grafana]
+    metrics/app:
+      receivers: [otlp/app]
+      processors: [memory_limiter, filter/identity, transform/identity, transform/allowlist, transform/runtime_identity_labels, batch]
+      exporters: [accountable_delivery/grafana]
+    logs/app:
+      receivers: [otlp/app]
+      processors: [memory_limiter, filter/identity, transform/identity, transform/allowlist, batch]
+      exporters: [accountable_delivery/grafana]
+    metrics/slo:
+      receivers: [otlp/slo]
+      processors: [memory_limiter, filter/sli, transform/sli]
+      exporters: [accountable_emf/sli]
+    metrics/internal:
+      receivers: [prometheus/internal]
+      processors: [memory_limiter, filter/internal, transform/internal, batch]
+      exporters: [accountable_emf/internal]

@@ -30,10 +30,16 @@ roots=(
 	environments/development/foundation
 	environments/development/cells/development-01
 	environments/development/cells/proof-01
+	environments/development/observability
+	global/grafana-stack
 	environments/staging/bootstrap
 	environments/staging/foundation
+	environments/staging/cells/staging-01
+	environments/staging/observability
 	environments/production/bootstrap
 	environments/production/foundation
+	environments/production/cells/production-01
+	environments/production/observability
 	environments/security-backup/bootstrap
 	environments/security-backup/foundation
 	environments/security-backup/audit
@@ -43,6 +49,9 @@ roots=(
 	modules/environment-foundation
 	modules/github-deployment
 	modules/cell
+	modules/observability-environment
+	modules/release-storage
+	modules/grafana-stack
 	modules/managed-contract
 	modules/organization-foundation
 	modules/organization-audit
@@ -53,14 +62,19 @@ for root in "${roots[@]}"; do
 	(
 		cd "$validation_root/$root"
 		has_required_providers=0
+		lock_source="$validation_root/modules/cell/.terraform.lock.hcl"
 		while IFS= read -r -d '' file; do
 			if grep -q 'required_providers' "$file"; then
 				has_required_providers=1
-				break
+			fi
+			if grep -q 'grafana/grafana' "$file"; then
+				lock_source="$validation_root/global/grafana-stack/.terraform.lock.hcl"
 			fi
 		done < <(find . -type f -name '*.tf' -print0)
 		if [[ "$has_required_providers" == "1" ]]; then
-			cp "$validation_root/.terraform.lock.hcl" .terraform.lock.hcl
+			if [[ ! .terraform.lock.hcl -ef "$lock_source" ]]; then
+				cp "$lock_source" .terraform.lock.hcl
+			fi
 			TF_DATA_DIR="$validation_root/.terraform-data/$root" tofu init \
 				-backend=false -input=false -lockfile=readonly -plugin-dir="$plugin_dir"
 		else

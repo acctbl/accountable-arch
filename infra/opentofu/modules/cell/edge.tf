@@ -122,6 +122,33 @@ resource "aws_cloudfront_origin_request_policy" "api" {
   }
 }
 
+resource "aws_cloudfront_origin_request_policy" "client_telemetry" {
+  name = "${local.name}-client-telemetry"
+
+  cookies_config {
+    cookie_behavior = "none"
+  }
+
+  headers_config {
+    header_behavior = "whitelist"
+
+    headers {
+      items = [
+        "Content-Type",
+        "Origin",
+        "X-Correlation-ID",
+        "X-Accountable-Proof-Timestamp",
+        "X-Accountable-Proof-Nonce",
+        "X-Accountable-Proof-Signature",
+      ]
+    }
+  }
+
+  query_strings_config {
+    query_string_behavior = "none"
+  }
+}
+
 resource "aws_cloudfront_response_headers_policy" "documents" {
   name = "${local.name}-documents"
 
@@ -134,8 +161,10 @@ resource "aws_cloudfront_response_headers_policy" "documents" {
   }
 
   security_headers_config {
-    # A static header cannot contain a nonce. The hash pins the inline script.
-    # apps/web/src/i18n/bootstrap.test.ts fails if that script changes.
+    # A static header cannot contain a nonce. The hash pins the inline
+    # document bootstrap script from apps/web/src/document-bootstrap.ts.
+    # Keep content-security-policy.txt in sync with:
+    #   pnpm --filter @accountable/web csp:write
     content_security_policy {
       override                = true
       content_security_policy = trimspace(file("${path.module}/content-security-policy.txt"))
@@ -196,6 +225,45 @@ resource "aws_wafv2_web_acl" "edge" {
 
   default_action {
     allow {}
+  }
+
+  rule {
+    name     = "ClientTelemetryRateLimit"
+    priority = 25
+
+    action {
+      block {}
+    }
+
+    statement {
+      rate_based_statement {
+        aggregate_key_type    = "IP"
+        evaluation_window_sec = 300
+        limit                 = 600
+
+        scope_down_statement {
+          byte_match_statement {
+            positional_constraint = "EXACTLY"
+            search_string         = "/api/telemetry/v1"
+
+            field_to_match {
+              uri_path {}
+            }
+
+            text_transformation {
+              priority = 0
+              type     = "NONE"
+            }
+          }
+        }
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name}-client-telemetry-rate-limit"
+      sampled_requests_enabled   = false
+    }
   }
 
   rule {
@@ -316,6 +384,22 @@ resource "aws_cloudfront_distribution" "cell" {
     function_association {
       event_type   = "viewer-request"
       function_arn = aws_cloudfront_function.spa_router.arn
+    }
+  }
+
+  ordered_cache_behavior {
+    allowed_methods          = ["OPTIONS", "POST"]
+    cache_policy_id          = aws_cloudfront_cache_policy.api.id
+    cached_methods           = []
+    compress                 = false
+    origin_request_policy_id = aws_cloudfront_origin_request_policy.client_telemetry.id
+    path_pattern             = "/api/telemetry/v1"
+    target_origin_id         = "api"
+    viewer_protocol_policy   = "redirect-to-https"
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.api_prefix.arn
     }
   }
 

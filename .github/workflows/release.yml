@@ -1,0 +1,197 @@
+name: Signed release manifest
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_digest:
+        description: API image manifest digest (sha256:...)
+        required: true
+        type: string
+      collector_digest:
+        description: Collector image manifest digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: signed-release
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/require-green-ci.yml
+    permissions:
+      actions: read
+      contents: read
+
+  release:
+    if: github.ref == 'refs/heads/main'
+    needs: ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: development
+    env:
+      AWS_REGION: eu-west-2
+      AWS_DEFAULT_REGION: eu-west-2
+      AWS_ROLE_ARN: arn:aws:iam::453722413624:role/accountable-development-apply
+      RELEASE_BUCKET: accountable-releases-453722413624-eu-west-2
+      # The bucket policy compares the request value, and an alias ARN never
+      # matches a key ARN, so this must stay the key ARN.
+      RELEASE_KMS_KEY_ID: ${{ vars.ACCOUNTABLE_RELEASE_KMS_KEY_ARN }}
+      IMAGE_REGISTRY: 453722413624.dkr.ecr.eu-west-2.amazonaws.com
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned mise
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.7.13
+
+      - name: Request AWS apply identity
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const token = await core.getIDToken("sts.amazonaws.com");
+            const tokenPath = path.join(process.env.RUNNER_TEMP, "aws-release-token");
+            fs.writeFileSync(tokenPath, token, { mode: 0o600 });
+            core.exportVariable("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath);
+
+      # A manifest may only name artifacts that exist and are themselves signed, so
+      # each digest is resolved in its repository and verified before signing.
+      - name: Verify both image digests in ECR and Sigstore
+        env:
+          API_DIGEST: ${{ inputs.api_digest }}
+          COLLECTOR_DIGEST: ${{ inputs.collector_digest }}
+        run: |
+          set -euo pipefail
+          verify_image() {
+            local repository="$1" digest="$2" identity="$3"
+            aws ecr describe-images \
+              --repository-name "$repository" \
+              --image-ids "imageDigest=$digest" \
+              --query 'imageDetails[0].imageDigest' --output text >/dev/null
+            mise exec -- cosign verify \
+              --certificate-identity "$identity" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              "$IMAGE_REGISTRY/$repository@$digest" >/dev/null
+          }
+          verify_image accountable "$API_DIGEST" "https://github.com/${{ github.repository }}/.github/workflows/image-build.yml@refs/heads/main"
+          verify_image accountable-collector "$COLLECTOR_DIGEST" "https://github.com/${{ github.repository }}/.github/workflows/collector-image.yml@refs/heads/main"
+
+      # The web asset digest is computed from the built file set, never supplied.
+      - name: Build web assets and compute their canonical digest
+        run: |
+          set -euo pipefail
+          mise exec -- pnpm install --frozen-lockfile --ignore-scripts
+          mise exec -- pnpm --filter @accountable/web build
+          produced="$(mise exec -- go run ./cmd/release web-manifest \
+            --root "$(pwd)/apps/web/dist" \
+            --output "$RUNNER_TEMP/web-manifest.json")"
+          echo "WEB_ASSET_DIGEST=$(echo "$produced" | jq -r .web_asset_digest)" >>"$GITHUB_ENV"
+          # The archive is reproducible: sorted entries, no timestamps, no owners.
+          tar --sort=name --owner=0 --group=0 --numeric-owner --mtime='UTC 1970-01-01' \
+            -czf "$RUNNER_TEMP/web-assets.tar.gz" -C apps/web/dist .
+          echo "WEB_ARCHIVE_DIGEST=sha256:$(sha256sum "$RUNNER_TEMP/web-assets.tar.gz" | cut -d' ' -f1)" >>"$GITHUB_ENV"
+
+      - name: Produce and sign the canonical manifest
+        env:
+          API_DIGEST: ${{ inputs.api_digest }}
+          COLLECTOR_DIGEST: ${{ inputs.collector_digest }}
+        run: |
+          set -euo pipefail
+          produced="$(mise exec -- go run ./cmd/release produce \
+            --api-digest "$API_DIGEST" \
+            --collector-digest "$COLLECTOR_DIGEST" \
+            --web-digest "$WEB_ASSET_DIGEST" \
+            --web-archive-digest "$WEB_ARCHIVE_DIGEST" \
+            --commit "$GITHUB_SHA" \
+            --registry "$IMAGE_REGISTRY" \
+            --bucket "$RELEASE_BUCKET" \
+            --output "$RUNNER_TEMP/release.json")"
+          echo "RELEASE_ID=$(jq -r .release_id <<<"$produced")" >>"$GITHUB_ENV"
+          echo "MANIFEST_DIGEST=$(jq -r .release_manifest_digest <<<"$produced")" >>"$GITHUB_ENV"
+          echo "MANIFEST_KEY=$(jq -r .release_manifest_key <<<"$produced")" >>"$GITHUB_ENV"
+
+      - name: Sign the canonical manifest
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes \
+            --bundle "$RUNNER_TEMP/release.sigstore.json" \
+            "$RUNNER_TEMP/release.json"
+          bundle_digest="sha256:$(sha256sum "$RUNNER_TEMP/release.sigstore.json" | cut -d' ' -f1)"
+          echo "BUNDLE_DIGEST=$bundle_digest" >>"$GITHUB_ENV"
+          echo "BUNDLE_KEY=releases/v1/bundles/$bundle_digest.json" >>"$GITHUB_ENV"
+
+      - name: Verify the signature before publication
+        env:
+          WORKFLOW_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg api_digest "${{ inputs.api_digest }}" \
+            --arg collector_digest "${{ inputs.collector_digest }}" \
+            --arg web_digest "$WEB_ASSET_DIGEST" \
+            '{api_oci: $api_digest, collector_oci: $collector_digest, web_assets: $web_digest}' \
+            >"$RUNNER_TEMP/artifacts.json"
+          go run ./cmd/release verify \
+            --manifest "$RUNNER_TEMP/release.json" \
+            --bundle "$RUNNER_TEMP/release.sigstore.json" \
+            --manifest-digest "$MANIFEST_DIGEST" \
+            --bundle-digest "$BUNDLE_DIGEST" \
+            --artifacts "$RUNNER_TEMP/artifacts.json" \
+            --workflow-identity "$WORKFLOW_IDENTITY"
+
+      - name: Store the manifest, bundle, and web file manifest at immutable keys
+        run: |
+          set -euo pipefail
+          aws s3api put-object \
+            --bucket "$RELEASE_BUCKET" \
+            --key "releases/v1/web/$WEB_ARCHIVE_DIGEST.tar.gz" \
+            --body "$RUNNER_TEMP/web-assets.tar.gz" \
+            --content-type application/gzip \
+            --server-side-encryption aws:kms \
+            --ssekms-key-id "$RELEASE_KMS_KEY_ID" \
+            --if-none-match '*'
+          aws s3api put-object \
+            --bucket "$RELEASE_BUCKET" \
+            --key "releases/v1/web/$WEB_ASSET_DIGEST.json" \
+            --body "$RUNNER_TEMP/web-manifest.json" \
+            --content-type application/json \
+            --server-side-encryption aws:kms \
+            --ssekms-key-id "$RELEASE_KMS_KEY_ID" \
+            --if-none-match '*'
+          aws s3api put-object \
+            --bucket "$RELEASE_BUCKET" \
+            --key "$MANIFEST_KEY" \
+            --body "$RUNNER_TEMP/release.json" \
+            --content-type application/json \
+            --server-side-encryption aws:kms \
+            --ssekms-key-id "$RELEASE_KMS_KEY_ID" \
+            --if-none-match '*'
+          aws s3api put-object \
+            --bucket "$RELEASE_BUCKET" \
+            --key "$BUNDLE_KEY" \
+            --body "$RUNNER_TEMP/release.sigstore.json" \
+            --content-type application/json \
+            --server-side-encryption aws:kms \
+            --ssekms-key-id "$RELEASE_KMS_KEY_ID" \
+            --if-none-match '*'
+
+      - name: Report the release inputs for deployment
+        run: |
+          set -euo pipefail
+          echo "### Signed release" >>"$GITHUB_STEP_SUMMARY"
+          echo "" >>"$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >>"$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >>"$GITHUB_STEP_SUMMARY"
+          echo "| release_id | \`$RELEASE_ID\` |" >>"$GITHUB_STEP_SUMMARY"
+          echo "| release_manifest_digest | \`$MANIFEST_DIGEST\` |" >>"$GITHUB_STEP_SUMMARY"
+          echo "| signature_bundle_digest | \`$BUNDLE_DIGEST\` |" >>"$GITHUB_STEP_SUMMARY"

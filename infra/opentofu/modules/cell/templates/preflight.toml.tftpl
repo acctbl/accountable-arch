@@ -14,8 +14,14 @@ postgres = true
 secrets = true
 kms = true
 object_storage = true
-telemetry = false
+telemetry = true
 redpanda = false
+
+[telemetry]
+collector_endpoint = "${collector_endpoint}"
+protocol = "otlp_http"
+sampling_policy = "parent_based_5pct_v1"
+redaction_policy_version = "allowlist_v1"
 
 [secrets]
 provider = "aws_parameter_store"

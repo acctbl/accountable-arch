@@ -20,7 +20,8 @@
       "name": "web_assets",
       "type": "web_assets",
       "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-      "immutable_uri": "s3://accountable-artifacts/web/sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.tar"
+      "archive_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "immutable_uri": "s3://accountable-artifacts/web/sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.tar.gz"
     }
   ]
 }

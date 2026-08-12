@@ -36,6 +36,7 @@ variables {
   account_id                 = "453722413624"
   environment                = "development"
   github_oidc_subject_prefix = "repo:acctbl@309473689/accountable@1318144297"
+  github_repository          = "acctbl/accountable"
   region                     = "eu-west-2"
 }
 
@@ -54,5 +55,13 @@ run "repository_is_immutable_and_scanned" {
   assert {
     condition     = aws_ecr_repository.application.image_scanning_configuration[0].scan_on_push
     error_message = "The application repository must scan images on push."
+  }
+
+  assert {
+    condition = (
+      aws_ecr_repository.synthetic.image_tag_mutability == "IMMUTABLE" &&
+      aws_ecr_repository.synthetic.image_scanning_configuration[0].scan_on_push
+    )
+    error_message = "The synthetic workload repository must be immutable and scanned."
   }
 }

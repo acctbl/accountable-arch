@@ -11,6 +11,7 @@ import (
 
 	"github.com/acctbl/accountable/internal/platform/clock"
 	"github.com/acctbl/accountable/internal/platform/secret"
+	"github.com/acctbl/accountable/internal/platform/telemetry"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -20,7 +21,7 @@ const (
 	// MinimumSchemaVersion and MaximumSchemaVersion are compiled into the binary.
 	// Operators cannot widen this compatibility window through configuration.
 	MinimumSchemaVersion int64 = 20260801000000
-	MaximumSchemaVersion int64 = 20260801000000
+	MaximumSchemaVersion int64 = 20260811000000
 )
 
 var (
@@ -38,7 +39,14 @@ type Database struct {
 	config Config
 }
 
-func OpenDatabase(ctx context.Context, config Config, source secret.SecretSource) (*Database, error) {
+// OpenDatabase opens the pool. A recorder attaches the query tracer, so every
+// database operation carries its span and its bounded metric point.
+func OpenDatabase(
+	ctx context.Context,
+	config Config,
+	source secret.SecretSource,
+	recorder *telemetry.Recorder,
+) (*Database, error) {
 	connectCtx, cancel := context.WithTimeout(ctx, config.ConnectTimeout)
 	defer cancel()
 
@@ -53,6 +61,9 @@ func OpenDatabase(ctx context.Context, config Config, source secret.SecretSource
 	poolConfig, err := databasePoolConfig(config, password)
 	if err != nil {
 		return nil, errors.New("database configuration is invalid")
+	}
+	if recorder != nil {
+		poolConfig.ConnConfig.Tracer = SignalTracer{Recorder: recorder}
 	}
 	pool, err := pgxpool.NewWithConfig(connectCtx, poolConfig)
 	if err != nil {
@@ -191,6 +202,24 @@ func (d *Database) Ping(ctx context.Context) error {
 }
 
 func (d *Database) Close() { d.pool.Close() }
+
+func (d *Database) ClaimProofNonce(ctx context.Context, nonce string, expiresAt time.Time) (bool, error) {
+	var claimed bool
+	err := d.pool.QueryRow(ctx, `
+WITH expired AS (
+    DELETE FROM public.accountable_proof_nonces WHERE expires_at < clock_timestamp()
+), claimed AS (
+    INSERT INTO public.accountable_proof_nonces (nonce, expires_at)
+    VALUES ($1, $2)
+    ON CONFLICT DO NOTHING
+    RETURNING TRUE
+)
+SELECT COALESCE((SELECT TRUE FROM claimed), FALSE)`, nonce, expiresAt.UTC()).Scan(&claimed)
+	if err != nil {
+		return false, ErrDatabaseUnavailable
+	}
+	return claimed, nil
+}
 
 func (d *Database) CheckClock(ctx context.Context, source clock.Clock, maximumSkew time.Duration) error {
 	before := source.Now()

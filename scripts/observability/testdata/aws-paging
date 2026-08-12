@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+service="${1:?missing service}"
+operation="${2:?missing operation}"
+state="${PAGING_TEST_STATE_DIR:?set PAGING_TEST_STATE_DIR}"
+scenario="${PAGING_TEST_SCENARIO:?set PAGING_TEST_SCENARIO}"
+
+argument() {
+	local name="$1"
+	shift
+	while (($# > 0)); do
+		if [[ "$1" == "$name" ]]; then
+			printf '%s\n' "$2"
+			return
+		fi
+		shift
+	done
+	return 1
+}
+
+case "$service:$operation" in
+	sts:get-caller-identity)
+		printf '1\n'
+		;;
+	cloudwatch:describe-alarms)
+		printf '%s\n' '{"MetricAlarms":[{"AlarmName":"accountable-production-proof-test","StateValue":"OK","AlarmActions":["arn:aws:sns:eu-west-2:1:accountable-production-observability-alarm-input"],"AlarmDescription":"{\"schema_version\":1,\"severity\":\"critical\"}"}]}'
+		;;
+	sns:list-subscriptions-by-topic)
+		case "$scenario" in
+		missing-email) printf '{"Subscriptions":[]}\n' ;;
+		irm) printf '%s\n' '{"Subscriptions":[{"Protocol":"email","SubscriptionArn":"arn:aws:sns:eu-west-2:1:topic:email"},{"Protocol":"https","SubscriptionArn":"arn:aws:sns:eu-west-2:1:topic:https"}]}' ;;
+		*) printf '%s\n' '{"Subscriptions":[{"Protocol":"email","SubscriptionArn":"arn:aws:sns:eu-west-2:1:topic:email"}]}' ;;
+		esac
+		;;
+	cloudwatch:get-metric-statistics)
+		metric="$(argument --metric-name "$@")"
+		if [[ "$metric" == "NumberOfNotificationsFailed" ]]; then
+			value=0
+		elif [[ "$scenario" == "irm" ]]; then
+			if [[ -e "$state/recovered" ]]; then value=4; elif [[ -e "$state/fired" ]]; then value=2; else value=0; fi
+		else
+			if [[ -e "$state/recovered" ]]; then value=2; elif [[ -e "$state/fired" ]]; then value=1; else value=0; fi
+		fi
+		printf '{"Datapoints":[{"Sum":%s}]}\n' "$value"
+		;;
+	cloudwatch:set-alarm-state)
+		alarm_state="$(argument --state-value "$@")"
+		if [[ "$alarm_state" == "ALARM" ]]; then
+			: >"$state/fired"
+		else
+			: >"$state/recovered"
+		fi
+		;;
+	ssm:get-parameter)
+		printf 'protected-token\n'
+		;;
+	*) exit 2 ;;
+esac

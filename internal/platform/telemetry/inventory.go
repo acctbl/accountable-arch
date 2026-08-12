@@ -30,7 +30,7 @@ func ParseInventoryRecord(raw []byte) (InventoryRecord, error) {
 func ValidateInventoryRecord(record InventoryRecord) error {
 	if record.SchemaVersion != ContractSchemaVersion || !contains(registeredEnvironments, record.Environment) ||
 		!cellIDPattern.MatchString(record.CellID) || !contains([]string{"active", "inactive"}, record.State) ||
-		!releaseIDPattern.MatchString(record.DeploymentID) {
+		!uuidV7Pattern.MatchString(record.DeploymentID) {
 		return contractError("inventory record")
 	}
 	effectiveAt, err := time.Parse(time.RFC3339, record.EffectiveAt)

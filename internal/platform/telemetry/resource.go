@@ -48,7 +48,7 @@ func ValidateProcessResource(resource ProcessResource) error {
 	if !cellIDPattern.MatchString(resource.CellID) {
 		return contractError("accountable.cell.id")
 	}
-	if !releaseIDPattern.MatchString(resource.ReleaseID) {
+	if !uuidV7Pattern.MatchString(resource.ReleaseID) {
 		return contractError("accountable.release.id")
 	}
 	if err := ValidateConfigIdentity(ConfigIdentity{

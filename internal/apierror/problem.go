@@ -39,9 +39,11 @@ type FieldViolation struct {
 
 type identityKey struct{}
 
+// Identity carries the public work identity of one request. The correlation ID
+// is the journey identity; a trace ID is never public.
 type Identity struct {
-	RequestID string
-	TraceID   string
+	RequestID     string
+	CorrelationID string
 }
 
 func WithIdentity(ctx context.Context, identity Identity) context.Context {
@@ -61,17 +63,16 @@ func New(
 	retryAfter time.Duration,
 ) *connect.Error {
 	code := connectCode(category)
-	problemID, uuidErr := uuid.NewV7()
-	if uuidErr != nil {
-		problemID = uuid.Nil
-	}
-
 	identity := IdentityFromContext(ctx)
 	detail := &errorv1.ProblemDetail{
 		Code:       string(category),
 		MessageKey: messageKey,
-		ProblemId:  problemID.String(),
 		RequestId:  identity.RequestID,
+	}
+	// A problem identity is never fabricated. When generation fails the field
+	// stays empty and the request and correlation headers remain valid.
+	if problemID, uuidErr := uuid.NewV7(); uuidErr == nil {
+		detail.ProblemId = problemID.String()
 	}
 	for _, violation := range violations {
 		detail.FieldViolations = append(detail.FieldViolations, &errorv1.FieldViolation{
@@ -90,6 +91,30 @@ func New(
 		err.AddDetail(errorDetail)
 	}
 	return err
+}
+
+// CategoryOf reports the bounded problem category of one handler error. It reads
+// the safe detail, never the error text.
+func CategoryOf(err error) Category {
+	if err == nil {
+		return ""
+	}
+	var connectErr *connect.Error
+	if !errors.As(err, &connectErr) {
+		return InternalFailure
+	}
+	for _, detail := range connectErr.Details() {
+		value, valueErr := detail.Value()
+		if valueErr != nil {
+			continue
+		}
+		problem, ok := value.(*errorv1.ProblemDetail)
+		if !ok {
+			continue
+		}
+		return Category(problem.GetCode())
+	}
+	return InternalFailure
 }
 
 func EnsureSafe(ctx context.Context, err error) error {

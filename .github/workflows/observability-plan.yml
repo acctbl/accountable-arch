@@ -1,0 +1,299 @@
+name: Observability plan and apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Shared observability target
+        required: true
+        type: choice
+        options: [development, staging, production, global]
+      apply:
+        description: Apply the reviewed saved plan
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: observability-${{ inputs.target }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-west-2
+  AWS_DEFAULT_REGION: eu-west-2
+
+jobs:
+  ci:
+    uses: ./.github/workflows/require-green-ci.yml
+    permissions:
+      actions: read
+      contents: read
+
+  capacity:
+    if: github.ref == 'refs/heads/main'
+    needs: ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Request branch-trusted capacity identity
+        if: inputs.target != 'development'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const token = await core.getIDToken("sts.amazonaws.com");
+            const tokenPath = path.join(process.env.RUNNER_TEMP, "aws-observability-capacity-token");
+            fs.writeFileSync(tokenPath, token, { mode: 0o600 });
+            core.exportVariable("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath);
+            core.exportVariable("AWS_ROLE_ARN", "arn:aws:iam::453722413624:role/accountable-development-plan");
+
+      - name: Read the published capacity sample
+        if: inputs.target != 'development'
+        run: bash scripts/observability/check-capacity.sh >"$RUNNER_TEMP/capacity.json"
+
+      - name: Mark the capacity-producer bootstrap
+        if: inputs.target == 'development'
+        run: jq -n '{state:"bootstrap"}' >"$RUNNER_TEMP/capacity.json"
+
+      - name: Preserve the consumed capacity input
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: observability-capacity-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/capacity.json
+          retention-days: 1
+
+  plan:
+    if: github.ref == 'refs/heads/main'
+    needs: [ci, capacity]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.7.13
+
+      - name: Resolve the branch-trusted plan identity
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          case "$TARGET" in
+            development) account=453722413624; root="infra/opentofu/environments/development/observability" ;;
+            staging) account=723225039926; root="infra/opentofu/environments/staging/observability" ;;
+            production) account=576329195663; root="infra/opentofu/environments/production/observability" ;;
+            global) account=453722413624; root="infra/opentofu/global/grafana-stack" ;;
+          esac
+          environment="$TARGET"
+          if [[ "$TARGET" == "global" ]]; then environment=development; fi
+          echo "AWS_ACCOUNT_ID=$account" >>"$GITHUB_ENV"
+          echo "AWS_ROLE_ARN=arn:aws:iam::$account:role/accountable-$environment-plan" >>"$GITHUB_ENV"
+          echo "OBSERVABILITY_ENVIRONMENT=$environment" >>"$GITHUB_ENV"
+          echo "ROOT=$root" >>"$GITHUB_ENV"
+
+      - name: Request branch-trusted plan identity
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const token = await core.getIDToken("sts.amazonaws.com");
+            const tokenPath = path.join(process.env.RUNNER_TEMP, "aws-observability-plan-token");
+            fs.writeFileSync(tokenPath, token, { mode: 0o600 });
+            core.exportVariable("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath);
+
+      - name: Build deterministic environment packages
+        if: inputs.target != 'global'
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          mise trust mise.toml
+          mise exec -- bash scripts/observability/build-lambdas.sh "$TARGET"
+
+      - name: Create environment saved plan
+        if: inputs.target != 'global'
+        env:
+          TARGET: ${{ inputs.target }}
+          ALERT_EMAILS: ${{ vars.ACCOUNTABLE_ALERT_EMAILS }}
+          CELLS: ${{ vars.ACCOUNTABLE_CELLS }}
+          RUNTIME_LOG_GROUP: ${{ vars.ACCOUNTABLE_RUNTIME_LOG_GROUP }}
+          GRAFANA_STACK_URL: ${{ vars.ACCOUNTABLE_GRAFANA_STACK_URL }}
+          GRAFANA_CLOUD_ACCOUNT_ID: ${{ vars.ACCOUNTABLE_GRAFANA_CLOUD_ACCOUNT_ID }}
+          GRAFANA_CLOUD_EXTERNAL_ID: ${{ vars.ACCOUNTABLE_GRAFANA_CLOUD_EXTERNAL_ID }}
+          RUNBOOK_BASE_URL: ${{ vars.ACCOUNTABLE_RUNBOOK_BASE_URL }}
+        run: |
+          set -euo pipefail
+          emails="$(jq -cRn --arg value "$ALERT_EMAILS" '$value | split(",") | map(select(length > 0))')"
+          cells="$(jq -cRn --arg value "$CELLS" '$value | split(",") | map(select(length > 0) | split("=")) | map({(.[0]): .[1]}) | add // {}')"
+          variables=(
+            -var="alert_email_addresses=$emails"
+            -var="cells=$cells"
+            -var="runtime_log_group_name=$RUNTIME_LOG_GROUP"
+            -var="grafana_base_url=$GRAFANA_STACK_URL"
+            -var="grafana_cloud_account_id=$GRAFANA_CLOUD_ACCOUNT_ID"
+            -var="grafana_cloud_external_id=$GRAFANA_CLOUD_EXTERNAL_ID"
+            -var="translator_package_path=$(pwd)/dist/lambda/$TARGET/translator.zip"
+            -var="canary_package_path=$(pwd)/dist/lambda/$TARGET/canary.zip"
+            -var="runbook_base_url=$RUNBOOK_BASE_URL"
+            -var="dashboard_base_url=$GRAFANA_STACK_URL"
+          )
+          if [[ "$TARGET" == "development" ]]; then
+            variables+=(-var="capacity_package_path=$(pwd)/dist/lambda/development/capacity.zip")
+          fi
+          mise exec -- tofu -chdir="$ROOT" init -input=false
+          mise exec -- tofu -chdir="$ROOT" plan -input=false -out="$RUNNER_TEMP/observability.plan" "${variables[@]}"
+
+      - name: Create global saved plan
+        if: inputs.target == 'global'
+        env:
+          GRAFANA_STACK_URL: ${{ vars.ACCOUNTABLE_GRAFANA_STACK_URL }}
+          GRAFANA_CLOUD_EXTERNAL_ID: ${{ vars.ACCOUNTABLE_GRAFANA_CLOUD_EXTERNAL_ID }}
+          RUNBOOK_BASE_URL: ${{ vars.ACCOUNTABLE_RUNBOOK_BASE_URL }}
+        run: |
+          set -euo pipefail
+          token="$(aws ssm get-parameter --name /accountable/observability/development/grafana-plan-token --with-decryption --query 'Parameter.Value' --output text)"
+          roles='{"development":"arn:aws:iam::453722413624:role/accountable-development-grafana-cloudwatch","staging":"arn:aws:iam::723225039926:role/accountable-staging-grafana-cloudwatch","production":"arn:aws:iam::576329195663:role/accountable-production-grafana-cloudwatch"}'
+          topics='{"development":{"critical":"arn:aws:sns:eu-west-2:453722413624:accountable-development-observability-critical","proof":"arn:aws:sns:eu-west-2:453722413624:accountable-development-observability-proof","warning":"arn:aws:sns:eu-west-2:453722413624:accountable-development-observability-warning"},"staging":{"critical":"arn:aws:sns:eu-west-2:723225039926:accountable-staging-observability-critical","proof":"arn:aws:sns:eu-west-2:723225039926:accountable-staging-observability-proof","warning":"arn:aws:sns:eu-west-2:723225039926:accountable-staging-observability-warning"},"production":{"critical":"arn:aws:sns:eu-west-2:576329195663:accountable-production-observability-critical","proof":"arn:aws:sns:eu-west-2:576329195663:accountable-production-observability-proof","warning":"arn:aws:sns:eu-west-2:576329195663:accountable-production-observability-warning"}}'
+          mise exec -- tofu -chdir="$ROOT" init -input=false
+          GRAFANA_AUTH="$token" mise exec -- tofu -chdir="$ROOT" plan -input=false -out="$RUNNER_TEMP/observability.plan" \
+            -var="stack_url=$GRAFANA_STACK_URL" \
+            -var="cloudwatch_role_arns=$roles" \
+            -var="alert_topic_arns=$topics" \
+            -var="grafana_cloud_external_id=$GRAFANA_CLOUD_EXTERNAL_ID" \
+            -var="runbook_base_url=$RUNBOOK_BASE_URL"
+          unset token
+
+      - name: Render the reviewed plan
+        run: mise exec -- tofu -chdir="$ROOT" show -no-color "$RUNNER_TEMP/observability.plan" >"$RUNNER_TEMP/observability-plan.txt"
+
+      - name: Upload reviewed saved plan
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: observability-${{ inputs.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/observability.plan
+            ${{ runner.temp }}/observability-plan.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  apply:
+    if: inputs.apply
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment:
+      name: ${{ inputs.target == 'global' && 'development' || inputs.target }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.7.13
+
+      - name: Download reviewed saved plan
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: observability-${{ inputs.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/observability
+
+      - name: Download consumed capacity input
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: observability-capacity-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/capacity
+
+      - name: Resolve the protected apply identity
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          case "$TARGET" in
+            development) account=453722413624; environment=development; root="infra/opentofu/environments/development/observability" ;;
+            staging) account=723225039926; environment=staging; root="infra/opentofu/environments/staging/observability" ;;
+            production) account=576329195663; environment=production; root="infra/opentofu/environments/production/observability" ;;
+            global) account=453722413624; environment=development; root="infra/opentofu/global/grafana-stack" ;;
+          esac
+          echo "AWS_ROLE_ARN=arn:aws:iam::$account:role/accountable-$environment-apply" >>"$GITHUB_ENV"
+          echo "ROOT=$root" >>"$GITHUB_ENV"
+
+      - name: Request protected apply identity
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const token = await core.getIDToken("sts.amazonaws.com");
+            const tokenPath = path.join(process.env.RUNNER_TEMP, "aws-observability-apply-token");
+            fs.writeFileSync(tokenPath, token, { mode: 0o600 });
+            core.exportVariable("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath);
+
+      - name: Rebuild deterministic environment packages
+        if: inputs.target != 'global'
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          mise trust mise.toml
+          mise exec -- bash scripts/observability/build-lambdas.sh "$TARGET"
+
+      - name: Apply only the reviewed plan
+        env:
+          TARGET: ${{ inputs.target }}
+          GRAFANA_AUTH: ${{ inputs.target == 'global' && secrets.GRAFANA_STACK_CONTROL_TOKEN || '' }}
+        run: |
+          set -euo pipefail
+          mise trust mise.toml
+          if [[ "$TARGET" == "global" && -z "$GRAFANA_AUTH" ]]; then
+            echo "the protected Grafana stack-control token is required" >&2
+            exit 1
+          fi
+          mise exec -- tofu -chdir="$ROOT" init -input=false
+          mise exec -- tofu -chdir="$ROOT" apply -input=false "$RUNNER_TEMP/observability/observability.plan"
+          mise exec -- tofu -chdir="$ROOT" output -json >"$RUNNER_TEMP/observability-outputs.json"
+          echo "### Observability outputs" >>"$GITHUB_STEP_SUMMARY"
+          echo '```json' >>"$GITHUB_STEP_SUMMARY"
+          jq 'with_entries(select(.value.sensitive | not))' "$RUNNER_TEMP/observability-outputs.json" >>"$GITHUB_STEP_SUMMARY"
+          echo '```' >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Produce or revalidate the exact capacity sample
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          if [[ "$TARGET" == "development" ]]; then
+            aws lambda invoke \
+              --function-name accountable-grafana-capacity \
+              --cli-binary-format raw-in-base64-out \
+              --payload '{}' \
+              "$RUNNER_TEMP/capacity-invocation.json" >/dev/null
+            jq -e 'type == "null" or type == "object"' "$RUNNER_TEMP/capacity-invocation.json" >/dev/null
+            bash scripts/observability/check-capacity.sh >"$RUNNER_TEMP/capacity/capacity.json"
+          fi
+          source scripts/observability/lib/evidence.sh
+          accountable_require_fresh_capacity "$RUNNER_TEMP/capacity/capacity.json"
+
+      - name: Configure the entitlement-controlled IRM route
+        if: inputs.target != 'global'
+        env:
+          ACCOUNTABLE_ENVIRONMENT: ${{ inputs.target }}
+          ACCOUNTABLE_CAPACITY_EVIDENCE: ${{ runner.temp }}/capacity/capacity.json
+        run: |
+          set -euo pipefail
+          export ACCOUNTABLE_CRITICAL_TOPIC_ARN
+          ACCOUNTABLE_CRITICAL_TOPIC_ARN="$(jq -er .critical_topic_arn.value "$RUNNER_TEMP/observability-outputs.json")"
+          bash scripts/observability/configure-irm-route.sh

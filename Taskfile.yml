@@ -22,19 +22,9 @@ tasks:
         fi
 
   api:dev:
-    desc: Run migrated local Postgres and the API with file-backed local secrets
+    desc: Start disposable Docker Postgres, migrate, preflight, and serve the API
     cmds:
       - bash scripts/with-test-postgres.sh bash scripts/api-dev.sh
-
-  db:migrate:
-    desc: Apply compiled migrations through the explicit migrator binary
-    cmds:
-      - go run ./cmd/migrate --config "{{.ROOT_DIR}}/config/local/migrate.toml"
-
-  preflight:
-    desc: Run the API startup safety checks without opening a listener
-    cmds:
-      - go run ./cmd/preflight --config "{{.ROOT_DIR}}/config/local/api.toml"
 
   generate:
     desc: Regenerate versioned code
@@ -73,8 +63,17 @@ tasks:
       - pnpm format:check
 
   lint:
-    desc: Lint Buf, Go, and JavaScript/TypeScript
+    desc: Lint Buf, Go, JavaScript/TypeScript, and GitHub workflows
     cmds:
+      - bash scripts/check-workflows.sh
+      - bash scripts/observability/check-proof-workflow.sh
+      - bash scripts/observability/check-runbooks.sh
+      - bash scripts/observability/test-check-alarms.sh
+      - bash scripts/observability/test-check-capacity.sh
+      - bash scripts/observability/test-configure-irm-route.sh
+      - bash scripts/observability/test-prove-paging.sh
+      - bash -n scripts/aws/configure-github-oidc.sh scripts/observability/lib/evidence.sh scripts/observability/configure-irm-route.sh scripts/observability/prove-paging.sh scripts/observability/prove-task-uncertainty.sh scripts/observability/test-check-alarms.sh scripts/observability/test-check-capacity.sh scripts/observability/test-configure-irm-route.sh scripts/observability/test-prove-paging.sh
+      - bash scripts/release/test-backfill-object-lock.sh
       - buf lint
       - golangci-lint run ./cmd/... ./internal/... ./scripts/opentofu/aws-account-mock/...
       - pnpm lint
@@ -132,6 +131,11 @@ tasks:
       - go test -race ./... -skip Integration
       - pnpm -r --if-present test:unit
 
+  collector:validate:
+    desc: Build the pinned Collector distribution and validate the generated cell configuration
+    cmds:
+      - bash scripts/collector/validate-config.sh
+
   test:component:
     desc: Run component tests
     cmds:
@@ -159,12 +163,26 @@ tasks:
         ./internal/platform/storage ./internal/platform/crypto ./internal/platform/secret
         -run AWSContract -count=1 -timeout=90s
 
+  prove:observability:
+    desc: Prove the live observability posture of a cell and its environment
+    requires:
+      vars: [ACCOUNTABLE_CELL, ACCOUNTABLE_RELEASE_BUCKET]
+    cmds:
+      - bash scripts/aws/prove-observability-posture.sh
+
   test:cell-edge:
     desc: Prove browser and Connect behavior through a deployed CloudFront cell edge
     requires:
       vars: [ACCOUNTABLE_CELL_URL, ACCOUNTABLE_EXPECTED_RELEASE_ID]
     cmds:
       - pnpm exec playwright test --config playwright.cell.config.ts
+
+  test:production-smoke:
+    desc: Prove production-safe web, route, and API identity without failure injection
+    requires:
+      vars: [ACCOUNTABLE_CELL_URL, ACCOUNTABLE_EXPECTED_RELEASE_ID]
+    cmds:
+      - pnpm exec playwright test --config playwright.production.config.ts
 
   test:fuzz:
     desc: Run fuzz targets against the committed seed corpus only

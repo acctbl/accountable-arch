@@ -6,6 +6,10 @@ output "api_load_balancer_arn" {
   value = aws_lb.api.arn
 }
 
+output "api_target_group_arn" {
+  value = aws_lb_target_group.api.arn
+}
+
 output "api_task_role_arn" {
   value = aws_iam_role.api.arn
 }
@@ -68,4 +72,50 @@ output "rds_instance_identifier" {
 
 output "web_bucket_name" {
   value = aws_s3_bucket.web.bucket
+}
+
+output "web_runtime_config_base64" {
+  value = base64encode(local.web_runtime_config)
+}
+
+output "web_identity" {
+  value = {
+    release_id                   = var.release_id
+    web_asset_digest             = var.web_asset_digest
+    configuration_schema_version = 1
+    configuration_revision       = var.configuration_revision
+    configuration_fingerprint    = local.web_configuration_fingerprint
+  }
+}
+
+output "runtime_log_group_name" {
+  value = aws_cloudwatch_log_group.runtime.name
+}
+
+output "collector_service_name" {
+  value = aws_ecs_service.collector.name
+}
+
+output "collector_security_group_id" {
+  value = aws_security_group.collector.id
+}
+
+output "emf_sli_log_group_name" {
+  value = aws_cloudwatch_log_group.emf_sli.name
+}
+
+output "emf_internal_log_group_name" {
+  value = aws_cloudwatch_log_group.emf_internal.name
+}
+
+output "kms_key_arn" {
+  value = aws_kms_key.cell.arn
+}
+
+output "collector_parameter_path" {
+  value = local.collector_parameter_path
+}
+
+output "synthetic_service_name" {
+  value = try(aws_ecs_service.synthetic[0].name, null)
 }

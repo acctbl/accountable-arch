@@ -1,0 +1,45 @@
+name: Scheduled observability proof
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+    - cron: '43 5 1 1,4,7,10 *'
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+jobs:
+  staging-smoke:
+    if: github.event.schedule == '17 6 * * 1'
+    uses: ./.github/workflows/observability-proof.yml
+    with:
+      environment: staging
+      cell: staging-01
+      profile: smoke
+      duration: 10m
+      rate: 2
+    secrets: inherit
+
+  production-smoke:
+    if: github.event.schedule == '17 6 * * 1'
+    uses: ./.github/workflows/observability-proof.yml
+    with:
+      environment: production
+      cell: production-01
+      profile: smoke
+      duration: 5m
+      rate: 1
+    secrets: inherit
+
+  staging-game-day:
+    if: github.event.schedule == '43 5 1 1,4,7,10 *'
+    uses: ./.github/workflows/observability-proof.yml
+    with:
+      environment: staging
+      cell: staging-01
+      profile: controlled-failure
+      duration: 20m
+      rate: 5
+    secrets: inherit

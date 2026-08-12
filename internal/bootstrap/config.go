@@ -13,6 +13,7 @@ import (
 	"github.com/acctbl/accountable/internal/platform/database"
 	"github.com/acctbl/accountable/internal/platform/secret"
 	"github.com/acctbl/accountable/internal/platform/storage"
+	"github.com/acctbl/accountable/internal/platform/telemetry"
 )
 
 const (
@@ -47,6 +48,7 @@ type Config struct {
 	RuntimeRole            string
 	Fingerprint            string
 	Capabilities           Capabilities
+	Telemetry              telemetry.RuntimeConfig
 	CheckTimeout           time.Duration
 	ReadinessProbeInterval time.Duration
 	Secrets                secret.Config
@@ -62,6 +64,7 @@ type Capabilities struct {
 	Secrets           bool
 	KMS               bool
 	ObjectStorage     bool
+	Telemetry         bool
 }
 
 type TimeConfig struct {
@@ -83,6 +86,7 @@ type FileConfig struct {
 	Postgres               *DatabaseFileConfig    `toml:"postgres"`
 	ObjectStorage          *StorageFileConfig     `toml:"object_storage"`
 	KMS                    *CryptoFileConfig      `toml:"kms"`
+	Telemetry              *TelemetryFileConfig   `toml:"telemetry"`
 	Time                   *TimeFileConfig        `toml:"time"`
 	CheckTimeout           string                 `toml:"foundation_check_timeout"`
 	ReadinessProbeInterval string                 `toml:"readiness_probe_interval"`
@@ -140,6 +144,13 @@ type CryptoFileConfig struct {
 	EncryptionContextPrefix string `toml:"encryption_context_prefix"`
 }
 
+type TelemetryFileConfig struct {
+	CollectorEndpoint      string `toml:"collector_endpoint"`
+	Protocol               string `toml:"protocol"`
+	SamplingPolicy         string `toml:"sampling_policy"`
+	RedactionPolicyVersion string `toml:"redaction_policy_version"`
+}
+
 type TimeFileConfig struct {
 	Provider        string `toml:"provider"`
 	MaxClockError   string `toml:"max_clock_error"`
@@ -179,6 +190,9 @@ func Parse(configPath, fingerprint string, raw FileConfig) (Config, error) {
 	if raw.Environment == "production" && capabilities.ArchitectureProbe {
 		return Config{}, errors.New("production preflight: capabilities.architecture_probe must be false")
 	}
+	if managed && !capabilities.Telemetry {
+		return Config{}, errors.New("a managed runtime must enable capabilities.telemetry")
+	}
 	if capabilities.Postgres && !capabilities.Secrets {
 		return Config{}, errors.New("capabilities.postgres requires capabilities.secrets")
 	}
@@ -214,6 +228,18 @@ func Parse(configPath, fingerprint string, raw FileConfig) (Config, error) {
 			return Config{}, err
 		}
 	}
+	var telemetryConfig telemetry.RuntimeConfig
+	if capabilities.Telemetry {
+		telemetryConfig = telemetry.RuntimeConfig{
+			CollectorEndpoint:      raw.Telemetry.CollectorEndpoint,
+			Protocol:               raw.Telemetry.Protocol,
+			SamplingPolicy:         raw.Telemetry.SamplingPolicy,
+			RedactionPolicyVersion: raw.Telemetry.RedactionPolicyVersion,
+		}
+		if err := telemetry.ValidateRuntimeConfig(telemetryConfig); err != nil {
+			return Config{}, err
+		}
+	}
 	var cryptoConfig crypto.Config
 	if capabilities.KMS {
 		cryptoConfig, err = parseCrypto(managed, raw.AWSRegion, *raw.KMS)
@@ -229,7 +255,8 @@ func Parse(configPath, fingerprint string, raw FileConfig) (Config, error) {
 		SchemaVersion: raw.SchemaVersion, Revision: raw.Revision, Environment: raw.Environment,
 		DeploymentMode: raw.DeploymentMode, CellID: raw.CellID, AWSRegion: raw.AWSRegion,
 		RuntimeRole: raw.RuntimeRole, Fingerprint: fingerprint,
-		Capabilities: capabilities, CheckTimeout: checkTimeout, ReadinessProbeInterval: readinessProbeInterval,
+		Capabilities: capabilities, Telemetry: telemetryConfig,
+		CheckTimeout: checkTimeout, ReadinessProbeInterval: readinessProbeInterval,
 		Secrets: secretsConfig, Database: databaseConfig, Storage: storageConfig, Crypto: cryptoConfig, Time: timeConfig,
 	}, nil
 }
@@ -244,6 +271,7 @@ func parseCapabilities(raw FileConfig) (Capabilities, error) {
 		{"secrets", raw.Capabilities.Secrets, raw.Secrets != nil},
 		{"kms", raw.Capabilities.KMS, raw.KMS != nil},
 		{"object_storage", raw.Capabilities.ObjectStorage, raw.ObjectStorage != nil},
+		{"telemetry", raw.Capabilities.Telemetry, raw.Telemetry != nil},
 	}
 	if raw.Capabilities.ArchitectureProbe == nil || raw.Capabilities.Telemetry == nil || raw.Capabilities.Redpanda == nil {
 		return Capabilities{}, errors.New("every capability must be explicitly true or false")
@@ -256,9 +284,6 @@ func parseCapabilities(raw FileConfig) (Capabilities, error) {
 			return Capabilities{}, fmt.Errorf("capabilities.%s contradicts the %s section", check.name, check.name)
 		}
 	}
-	if *raw.Capabilities.Telemetry {
-		return Capabilities{}, errors.New("capabilities.telemetry must be false until telemetry is implemented")
-	}
 	if *raw.Capabilities.Redpanda {
 		return Capabilities{}, errors.New("capabilities.redpanda must be false until Redpanda is implemented")
 	}
@@ -269,6 +294,7 @@ func parseCapabilities(raw FileConfig) (Capabilities, error) {
 		ArchitectureProbe: *raw.Capabilities.ArchitectureProbe,
 		Postgres:          *raw.Capabilities.Postgres, Secrets: *raw.Capabilities.Secrets,
 		KMS: *raw.Capabilities.KMS, ObjectStorage: *raw.Capabilities.ObjectStorage,
+		Telemetry: *raw.Capabilities.Telemetry,
 	}, nil
 }
 

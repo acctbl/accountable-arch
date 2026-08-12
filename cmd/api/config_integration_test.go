@@ -102,8 +102,23 @@ postgres = true
 secrets = true
 kms = true
 object_storage = true
-telemetry = false
+telemetry = true
 redpanda = false
+
+[telemetry]
+collector_endpoint = "http://collector.development-01.accountable.internal:4318"
+protocol = "otlp_http"
+sampling_policy = "parent_based_5pct_v1"
+redaction_policy_version = "allowlist_v1"
+
+[client_telemetry]
+release_id = "018f47d2-7f00-7abc-8def-1234567890ab"
+web_asset_digest = "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+configuration_schema_version = 1
+configuration_revision = "reviewed-1"
+configuration_fingerprint = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+proof_key_active_ref = "proof-key-active"
+proof_key_standby_ref = "proof-key-standby"
 
 [server]
 listen_address = "0.0.0.0:8080"

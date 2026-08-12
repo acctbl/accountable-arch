@@ -39,6 +39,7 @@ module "managed_contract" {
   environment                = "development"
   github_environment         = "development"
   github_oidc_subject_prefix = "repo:acctbl@309473689/accountable@1318144297"
+  github_repository          = "acctbl/accountable"
   region                     = "eu-west-2"
 }
 

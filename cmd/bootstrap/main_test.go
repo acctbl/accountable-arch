@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
 
@@ -12,7 +13,10 @@ func TestLoadConfigAcceptsCompleteManagedBootstrapEnvironment(t *testing.T) {
 	t.Parallel()
 
 	path := writeBootstrapConfig(t, `
+schema_version = 1
+revision = "bootstrap-proof"
 aws_region = "eu-west-2"
+cell_id = "development-01"
 database_host = "database.example.com"
 environment = "development"
 kms_key_arn = "`+proofKMSKeyARN+`"
@@ -22,7 +26,9 @@ parameter_root = "/accountable/development-01/development"
 	if err != nil {
 		t.Fatalf("loadConfig: %v", err)
 	}
-	if config.region != "eu-west-2" || config.databaseHost != "database.example.com" ||
+	if config.cellID != "development-01" || config.identity.Revision != "bootstrap-proof" ||
+		config.identity.Fingerprint == "" ||
+		config.region != "eu-west-2" || config.databaseHost != "database.example.com" ||
 		config.apiSecrets.ParameterPath != "/accountable/development-01/development/api" ||
 		config.migrateSecrets.ParameterPath != "/accountable/development-01/development/migrate" ||
 		config.apiSecrets.KMSKeyARN != proofKMSKeyARN {
@@ -34,6 +40,7 @@ func TestLoadConfigRejectsMissingOrUnsafeManagedBootstrapEnvironment(t *testing.
 	t.Parallel()
 
 	base := fileConfig{
+		SchemaVersion: 1, Revision: "bootstrap-proof", CellID: "development-01",
 		AWSRegion: "eu-west-2", DatabaseHost: "database.example.com", Environment: "development",
 		KMSKeyARN: proofKMSKeyARN, ParameterRoot: "/accountable/development-01/development",
 	}
@@ -44,13 +51,19 @@ func TestLoadConfigRejectsMissingOrUnsafeManagedBootstrapEnvironment(t *testing.
 		"trailing parameter root":   func(value *fileConfig) { value.ParameterRoot = "/accountable/cell/" },
 		"missing kms key":           func(value *fileConfig) { value.KMSKeyARN = "" },
 		"aliased kms key":           func(value *fileConfig) { value.KMSKeyARN = "alias/aws/ssm" },
+		"missing cell":              func(value *fileConfig) { value.CellID = "" },
+		"missing revision":          func(value *fileConfig) { value.Revision = "" },
+		"wrong schema version":      func(value *fileConfig) { value.SchemaVersion = 2 },
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			value := base
 			mutate(&value)
 			path := writeBootstrapConfig(t, `
+schema_version = `+strconv.Itoa(value.SchemaVersion)+`
+revision = "`+value.Revision+`"
 aws_region = "`+value.AWSRegion+`"
+cell_id = "`+value.CellID+`"
 database_host = "`+value.DatabaseHost+`"
 environment = "`+value.Environment+`"
 kms_key_arn = "`+value.KMSKeyARN+`"

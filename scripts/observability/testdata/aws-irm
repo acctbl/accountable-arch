@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+service="${1:?missing service}"
+operation="${2:?missing operation}"
+state="${IRM_TEST_STATE_DIR:?set IRM_TEST_STATE_DIR}"
+scenario="${IRM_TEST_SCENARIO:?set IRM_TEST_SCENARIO}"
+
+case "$service:$operation" in
+	ssm:get-parameter)
+		printf '%s\n' 'https://irm.example.invalid/integration'
+		;;
+	ssm:put-parameter)
+		: >"$state/stored"
+		;;
+	ssm:delete-parameter)
+		: >"$state/deleted"
+		;;
+	sns:unsubscribe)
+		: >"$state/unsubscribed"
+		;;
+	sns:subscribe)
+		: >"$state/subscribed"
+		printf '{"SubscriptionArn":"pending confirmation"}\n'
+		;;
+	sns:list-subscriptions-by-topic)
+		case "$scenario" in
+		disable)
+			if [[ -e "$state/unsubscribed" ]]; then
+				printf '{"Subscriptions":[]}\n'
+			else
+				printf '%s\n' '{"Subscriptions":[{"Protocol":"https","Endpoint":"https://irm.example.invalid/integration","SubscriptionArn":"arn:aws:sns:eu-west-2:1:topic:confirmed"}]}'
+			fi
+			;;
+		existing)
+			printf '%s\n' '{"Subscriptions":[{"Protocol":"https","Endpoint":"https://irm.example.invalid/integration","SubscriptionArn":"arn:aws:sns:eu-west-2:1:topic:confirmed"}]}'
+			;;
+		create)
+			if [[ -e "$state/subscribed" ]]; then
+				printf '%s\n' '{"Subscriptions":[{"Protocol":"https","Endpoint":"https://irm.example.invalid/integration","SubscriptionArn":"arn:aws:sns:eu-west-2:1:topic:confirmed"}]}'
+			else
+				printf '{"Subscriptions":[]}\n'
+			fi
+			;;
+		conflict)
+			printf '%s\n' '{"Subscriptions":[{"Protocol":"https","Endpoint":"https://irm.example.invalid/integration","SubscriptionArn":"arn:aws:sns:eu-west-2:1:topic:first"},{"Protocol":"https","Endpoint":"https://other.example.invalid/integration","SubscriptionArn":"arn:aws:sns:eu-west-2:1:topic:other"}]}'
+			;;
+		*) exit 2 ;;
+		esac
+		;;
+	*) exit 2 ;;
+esac

@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "account_id": "723225039926",
+  "region": "eu-west-2",
+  "environment": "staging",
+  "input_topic_arn": "arn:aws:sns:eu-west-2:723225039926:accountable-staging-observability-alarm-input",
+  "critical_topic_arn": "arn:aws:sns:eu-west-2:723225039926:accountable-staging-observability-critical",
+  "warning_topic_arn": "arn:aws:sns:eu-west-2:723225039926:accountable-staging-observability-warning",
+  "proof_topic_arn": "arn:aws:sns:eu-west-2:723225039926:accountable-staging-observability-proof"
+}

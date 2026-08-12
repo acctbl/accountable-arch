@@ -107,6 +107,10 @@ func ValidateClientAdmission(envelope ClientEnvelope, policy ClientAdmissionPoli
 	if occurredAt.Before(now.Add(-pastAge)) || occurredAt.After(now.Add(futureSkew)) {
 		return contractError("occurred_at")
 	}
+	sampled, err := ClientSampled(envelope.CorrelationID, envelope.EventName)
+	if err != nil || !sampled {
+		return contractError("client sampling")
+	}
 	identity := ClientIdentityTuple{
 		Application:                envelope.ClientApplication,
 		ReleaseID:                  envelope.ReleaseID,
@@ -123,6 +127,19 @@ func ValidateClientAdmission(envelope ClientEnvelope, policy ClientAdmissionPoli
 		return nil
 	}
 	return contractError("client identity tuple")
+}
+
+func ValidateClientIdentityTuple(identity ClientIdentityTuple) error {
+	if !contains(clientRegistry.ClientApplications, identity.Application) ||
+		!uuidV7Pattern.MatchString(identity.ReleaseID) ||
+		!contains(clientRegistry.ClientArtifactTypes, identity.ArtifactType) ||
+		!digestPattern.MatchString(identity.ArtifactDigest) ||
+		identity.ConfigurationSchemaVersion != ContractSchemaVersion ||
+		!revisionPattern.MatchString(identity.ConfigurationRevision) ||
+		!fingerprintPattern.MatchString(identity.ConfigurationFingerprint) {
+		return contractError("client identity tuple")
+	}
+	return nil
 }
 
 func ClientSampled(correlationID, eventName string) (bool, error) {
@@ -309,6 +326,7 @@ func decodeJSONObject(raw []byte) (map[string]any, error) {
 
 func decodeStrictJSON(raw []byte, target any) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return contractError("json")

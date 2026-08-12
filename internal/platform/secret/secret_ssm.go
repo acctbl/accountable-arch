@@ -61,6 +61,36 @@ func (s *ParameterSecretSource) ResolveBatch(ctx context.Context, refs []Ref) (m
 	return resolveParameters(ctx, s.api, refs, names)
 }
 
+func (s *ParameterSecretSource) ResolveOptional(ctx context.Context, ref Ref) (SecretValue, bool, error) {
+	names, err := parameterNames(s.path, []Ref{ref})
+	if err != nil {
+		return SecretValue{}, false, err
+	}
+	output, err := s.api.GetParameters(ctx, &ssm.GetParametersInput{
+		Names:          names,
+		WithDecryption: aws.Bool(true),
+	})
+	if err != nil || output == nil {
+		return SecretValue{}, false, ErrSecretSourceUnavailable
+	}
+	if len(output.InvalidParameters) == 1 && output.InvalidParameters[0] == names[0] && len(output.Parameters) == 0 {
+		return SecretValue{}, false, nil
+	}
+	if len(output.InvalidParameters) != 0 || len(output.Parameters) != 1 {
+		return SecretValue{}, false, ErrSecretSourceUnavailable
+	}
+	parameter := output.Parameters[0]
+	if aws.ToString(parameter.Name) != names[0] || parameter.Value == nil || parameter.Type != types.ParameterTypeSecureString {
+		return SecretValue{}, false, ErrSecretSourceUnavailable
+	}
+	value := []byte(aws.ToString(parameter.Value))
+	defer clear(value)
+	if len(value) == 0 || len(value) > maximumSecretBytes {
+		return SecretValue{}, false, ErrSecretSourceUnavailable
+	}
+	return NewSecretValue(value), true, nil
+}
+
 func (s *ParameterSecretStore) ResolveOrCreateBatch(
 	ctx context.Context,
 	refs []Ref,

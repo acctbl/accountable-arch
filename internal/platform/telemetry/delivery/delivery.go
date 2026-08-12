@@ -1,4 +1,4 @@
-package telemetry
+package delivery
 
 import (
 	"bytes"
@@ -8,18 +8,22 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/acctbl/accountable/internal/platform/clock"
-	"github.com/cenkalti/backoff/v7"
+	"github.com/acctbl/accountable/internal/platform/telemetry"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/confighttp"
+	"go.opentelemetry.io/collector/config/configoptional"
 	"go.opentelemetry.io/collector/config/configretry"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/exporter"
+	"go.opentelemetry.io/collector/exporter/exporterhelper"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -31,6 +35,12 @@ import (
 )
 
 var accountableDeliveryType = component.MustNewType("accountable_delivery")
+
+const deliveryDrainTimeout = 20 * time.Second
+
+func contractError(field string) error {
+	return fmt.Errorf("%w: %s", telemetry.ErrInvalidContract, field)
+}
 
 type AccountableDeliveryQueueConfig struct {
 	Enabled      bool   `mapstructure:"enabled"`
@@ -56,9 +66,8 @@ func (config *AccountableDeliveryConfig) Validate() error {
 	if endpoint.Scheme != "https" && (endpoint.Scheme != "http" || endpoint.Hostname() != "127.0.0.1") {
 		return contractError("accountable_delivery endpoint")
 	}
-	if !contains(registeredEnvironments, config.Environment) || !cellIDPattern.MatchString(config.CellID) ||
-		!collectorTaskIDPattern.MatchString(config.CollectorTaskID) {
-		return contractError("accountable_delivery identity")
+	if err := telemetry.ValidateCollectorIdentity(config.Environment, config.CellID, config.CollectorTaskID); err != nil {
+		return err
 	}
 	if !config.SendingQueue.Enabled || config.SendingQueue.NumConsumers < 1 ||
 		config.SendingQueue.Sizer != "items" || config.SendingQueue.QueueSize < 1 {
@@ -69,15 +78,17 @@ func (config *AccountableDeliveryConfig) Validate() error {
 		return contractError("accountable_delivery retry")
 	}
 	if err := config.RetryOnFailure.Validate(); err != nil {
-		return fmt.Errorf("%w: accountable_delivery retry: %v", ErrInvalidContract, err)
+		return fmt.Errorf("%w: accountable_delivery retry: %v", telemetry.ErrInvalidContract, err)
 	}
 	if err := config.ClientConfig.Validate(); err != nil {
-		return fmt.Errorf("%w: accountable_delivery HTTP client: %v", ErrInvalidContract, err)
+		return fmt.Errorf("%w: accountable_delivery HTTP client: %v", telemetry.ErrInvalidContract, err)
 	}
 	return nil
 }
 
-func NewAccountableDeliveryFactory() exporter.Factory {
+// NewFactory is the OpenTelemetry Collector Builder entry point for the owned
+// Grafana delivery exporter.
+func NewFactory() exporter.Factory {
 	return exporter.NewFactory(
 		accountableDeliveryType,
 		newAccountableDeliveryConfig,
@@ -117,7 +128,7 @@ func (exporterComponent *accountableTracesExporter) Shutdown(ctx context.Context
 	return exporterComponent.delivery.Shutdown(ctx)
 }
 
-func (exporterComponent *accountableTracesExporter) DeliveryCounters() DeliveryCounters {
+func (exporterComponent *accountableTracesExporter) DeliveryCounters() telemetry.DeliveryCounters {
 	return exporterComponent.delivery.DeliveryCounters()
 }
 
@@ -134,7 +145,7 @@ func (exporterComponent *accountableMetricsExporter) Shutdown(ctx context.Contex
 	return exporterComponent.delivery.Shutdown(ctx)
 }
 
-func (exporterComponent *accountableMetricsExporter) DeliveryCounters() DeliveryCounters {
+func (exporterComponent *accountableMetricsExporter) DeliveryCounters() telemetry.DeliveryCounters {
 	return exporterComponent.delivery.DeliveryCounters()
 }
 
@@ -151,16 +162,19 @@ func (exporterComponent *accountableLogsExporter) Shutdown(ctx context.Context) 
 	return exporterComponent.delivery.Shutdown(ctx)
 }
 
-func (exporterComponent *accountableLogsExporter) DeliveryCounters() DeliveryCounters {
+func (exporterComponent *accountableLogsExporter) DeliveryCounters() telemetry.DeliveryCounters {
 	return exporterComponent.delivery.DeliveryCounters()
 }
 
-func createAccountableTracesExporter(_ context.Context, settings exporter.Settings, rawConfig component.Config) (exporter.Traces, error) {
+func createAccountableTracesExporter(ctx context.Context, settings exporter.Settings, rawConfig component.Config) (exporter.Traces, error) {
 	config, err := checkedAccountableDeliveryConfig(rawConfig)
 	if err != nil {
 		return nil, err
 	}
 	delivery := newAccountableDelivery(config, settings, traceDeliverySignal())
+	if err := delivery.configureTraceRetry(ctx); err != nil {
+		return nil, err
+	}
 	traces, err := consumer.NewTraces(delivery.consumeTraces, consumer.WithCapabilities(consumer.Capabilities{MutatesData: false}))
 	if err != nil {
 		return nil, err
@@ -168,12 +182,15 @@ func createAccountableTracesExporter(_ context.Context, settings exporter.Settin
 	return &accountableTracesExporter{Traces: traces, delivery: delivery}, nil
 }
 
-func createAccountableMetricsExporter(_ context.Context, settings exporter.Settings, rawConfig component.Config) (exporter.Metrics, error) {
+func createAccountableMetricsExporter(ctx context.Context, settings exporter.Settings, rawConfig component.Config) (exporter.Metrics, error) {
 	config, err := checkedAccountableDeliveryConfig(rawConfig)
 	if err != nil {
 		return nil, err
 	}
 	delivery := newAccountableDelivery(config, settings, metricDeliverySignal())
+	if err := delivery.configureMetricRetry(ctx); err != nil {
+		return nil, err
+	}
 	metrics, err := consumer.NewMetrics(delivery.consumeMetrics, consumer.WithCapabilities(consumer.Capabilities{MutatesData: false}))
 	if err != nil {
 		return nil, err
@@ -181,12 +198,15 @@ func createAccountableMetricsExporter(_ context.Context, settings exporter.Setti
 	return &accountableMetricsExporter{Metrics: metrics, delivery: delivery}, nil
 }
 
-func createAccountableLogsExporter(_ context.Context, settings exporter.Settings, rawConfig component.Config) (exporter.Logs, error) {
+func createAccountableLogsExporter(ctx context.Context, settings exporter.Settings, rawConfig component.Config) (exporter.Logs, error) {
 	config, err := checkedAccountableDeliveryConfig(rawConfig)
 	if err != nil {
 		return nil, err
 	}
 	delivery := newAccountableDelivery(config, settings, logDeliverySignal())
+	if err := delivery.configureLogRetry(ctx); err != nil {
+		return nil, err
+	}
 	logs, err := consumer.NewLogs(delivery.consumeLogs, consumer.WithCapabilities(consumer.Capabilities{MutatesData: false}))
 	if err != nil {
 		return nil, err
@@ -269,6 +289,13 @@ type deliveryResult struct {
 	dropped int64
 }
 
+type deliveryAttempt struct {
+	entry  deliveryEntry
+	result deliveryResult
+}
+
+type deliveryAttemptContextKey struct{}
+
 type accountableDelivery struct {
 	config   *AccountableDeliveryConfig
 	settings exporter.Settings
@@ -288,8 +315,15 @@ type accountableDelivery struct {
 	shutdown    bool
 
 	client     *http.Client
+	safeLogger *telemetry.SafeLogger
 	runContext context.Context
 	cancel     context.CancelFunc
+	retryStart component.StartFunc
+	retryStop  component.ShutdownFunc
+	retrySend  func(context.Context, deliveryEntry) (deliveryResult, error)
+	retryOnce  sync.Once
+	retryErr   error
+	cleanup    sync.Once
 	workers    sync.WaitGroup
 	done       chan struct{}
 	metrics    deliveryMetrics
@@ -305,15 +339,103 @@ type deliveryMetrics struct {
 
 func newAccountableDelivery(config *AccountableDeliveryConfig, settings exporter.Settings, signal deliverySignal) *accountableDelivery {
 	delivery := &accountableDelivery{
-		config:   config,
-		settings: settings,
-		signal:   signal,
-		pending:  make(map[uint64]deliveryEntry),
-		done:     make(chan struct{}),
-		clock:    clock.System{},
+		config:     config,
+		settings:   settings,
+		signal:     signal,
+		pending:    make(map[uint64]deliveryEntry),
+		done:       make(chan struct{}),
+		clock:      clock.System{},
+		safeLogger: telemetry.NewSafeLogger(telemetry.SafeLoggerOptions{Stdout: os.Stdout}),
 	}
 	delivery.condition = sync.NewCond(&delivery.mutex)
 	return delivery
+}
+
+func (delivery *accountableDelivery) retryOptions() []exporterhelper.Option {
+	return []exporterhelper.Option{
+		exporterhelper.WithQueue(configoptional.None[exporterhelper.QueueBatchConfig]()),
+		exporterhelper.WithRetry(delivery.config.RetryOnFailure),
+		exporterhelper.WithTimeout(exporterhelper.TimeoutConfig{Timeout: delivery.config.Timeout}),
+	}
+}
+
+func (delivery *accountableDelivery) configureTraceRetry(ctx context.Context) error {
+	helper, err := exporterhelper.NewTraces(
+		ctx, delivery.settings, delivery.config,
+		func(ctx context.Context, _ ptrace.Traces) error { return delivery.pushAttempt(ctx) },
+		delivery.retryOptions()...,
+	)
+	if err != nil {
+		return err
+	}
+	delivery.retryStart = helper.Start
+	delivery.retryStop = helper.Shutdown
+	delivery.retrySend = func(ctx context.Context, entry deliveryEntry) (deliveryResult, error) {
+		request := ptraceotlp.NewExportRequest()
+		if err := request.UnmarshalProto(entry.body); err != nil {
+			return deliveryResult{}, consumererror.NewPermanent(err)
+		}
+		attempt := &deliveryAttempt{entry: entry}
+		err := helper.ConsumeTraces(context.WithValue(ctx, deliveryAttemptContextKey{}, attempt), request.Traces())
+		return attempt.result, err
+	}
+	return nil
+}
+
+func (delivery *accountableDelivery) configureMetricRetry(ctx context.Context) error {
+	helper, err := exporterhelper.NewMetrics(
+		ctx, delivery.settings, delivery.config,
+		func(ctx context.Context, _ pmetric.Metrics) error { return delivery.pushAttempt(ctx) },
+		delivery.retryOptions()...,
+	)
+	if err != nil {
+		return err
+	}
+	delivery.retryStart = helper.Start
+	delivery.retryStop = helper.Shutdown
+	delivery.retrySend = func(ctx context.Context, entry deliveryEntry) (deliveryResult, error) {
+		request := pmetricotlp.NewExportRequest()
+		if err := request.UnmarshalProto(entry.body); err != nil {
+			return deliveryResult{}, consumererror.NewPermanent(err)
+		}
+		attempt := &deliveryAttempt{entry: entry}
+		err := helper.ConsumeMetrics(context.WithValue(ctx, deliveryAttemptContextKey{}, attempt), request.Metrics())
+		return attempt.result, err
+	}
+	return nil
+}
+
+func (delivery *accountableDelivery) configureLogRetry(ctx context.Context) error {
+	helper, err := exporterhelper.NewLogs(
+		ctx, delivery.settings, delivery.config,
+		func(ctx context.Context, _ plog.Logs) error { return delivery.pushAttempt(ctx) },
+		delivery.retryOptions()...,
+	)
+	if err != nil {
+		return err
+	}
+	delivery.retryStart = helper.Start
+	delivery.retryStop = helper.Shutdown
+	delivery.retrySend = func(ctx context.Context, entry deliveryEntry) (deliveryResult, error) {
+		request := plogotlp.NewExportRequest()
+		if err := request.UnmarshalProto(entry.body); err != nil {
+			return deliveryResult{}, consumererror.NewPermanent(err)
+		}
+		attempt := &deliveryAttempt{entry: entry}
+		err := helper.ConsumeLogs(context.WithValue(ctx, deliveryAttemptContextKey{}, attempt), request.Logs())
+		return attempt.result, err
+	}
+	return nil
+}
+
+func (delivery *accountableDelivery) pushAttempt(ctx context.Context) error {
+	attempt, ok := ctx.Value(deliveryAttemptContextKey{}).(*deliveryAttempt)
+	if !ok || attempt == nil {
+		return consumererror.NewPermanent(contractError("accountable_delivery retry context"))
+	}
+	result, err := delivery.sendOnce(ctx, attempt.entry)
+	attempt.result = result
+	return err
 }
 
 func (delivery *accountableDelivery) Start(ctx context.Context, host component.Host) error {
@@ -336,9 +458,20 @@ func (delivery *accountableDelivery) Start(ctx context.Context, host component.H
 		client.CloseIdleConnections()
 		return err
 	}
+	if delivery.retryStart == nil || delivery.retryStop == nil || delivery.retrySend == nil {
+		delivery.unregisterMetrics()
+		client.CloseIdleConnections()
+		return contractError("accountable_delivery retry helper")
+	}
+	if err := delivery.retryStart(ctx, host); err != nil {
+		delivery.unregisterMetrics()
+		client.CloseIdleConnections()
+		return fmt.Errorf("start accountable_delivery retry helper: %w", err)
+	}
 	delivery.mutex.Lock()
 	defer delivery.mutex.Unlock()
 	if delivery.started || delivery.shutdown {
+		_ = delivery.retryStop(ctx)
 		delivery.unregisterMetrics()
 		client.CloseIdleConnections()
 		return contractError("accountable_delivery lifecycle")
@@ -432,6 +565,9 @@ func (delivery *accountableDelivery) take() (deliveryEntry, bool) {
 	for len(delivery.queue) == 0 && delivery.accepting {
 		delivery.condition.Wait()
 	}
+	if delivery.runContext.Err() != nil {
+		return deliveryEntry{}, false
+	}
 	if len(delivery.queue) == 0 {
 		return deliveryEntry{}, false
 	}
@@ -443,62 +579,61 @@ func (delivery *accountableDelivery) take() (deliveryEntry, bool) {
 }
 
 func (delivery *accountableDelivery) deliver(entry deliveryEntry) (deliveryResult, error) {
-	retryContext, cancel := context.WithTimeout(delivery.runContext, delivery.config.RetryOnFailure.MaxElapsedTime)
-	defer cancel()
-	backOff := backoff.NewExponentialBackOff()
-	backOff.InitialInterval = delivery.config.RetryOnFailure.InitialInterval
-	backOff.RandomizationFactor = delivery.config.RetryOnFailure.RandomizationFactor
-	backOff.Multiplier = delivery.config.RetryOnFailure.Multiplier
-	backOff.MaxInterval = delivery.config.RetryOnFailure.MaxInterval
-	return backoff.Retry(
-		retryContext,
-		func() (deliveryResult, error) {
-			result, retryable, err := delivery.send(retryContext, entry)
-			if err != nil && !retryable {
-				return result, backoff.Permanent(err)
-			}
-			return result, err
-		},
-		backoff.WithBackOff(backOff),
-		backoff.WithMaxElapsedTime(delivery.config.RetryOnFailure.MaxElapsedTime),
-	)
+	return delivery.retrySend(delivery.runContext, entry)
 }
 
-func (delivery *accountableDelivery) send(ctx context.Context, entry deliveryEntry) (deliveryResult, bool, error) {
+func (delivery *accountableDelivery) sendOnce(ctx context.Context, entry deliveryEntry) (deliveryResult, error) {
 	endpoint := strings.TrimRight(delivery.config.Endpoint, "/") + delivery.signal.path
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(entry.body))
 	if err != nil {
-		return deliveryResult{}, false, err
+		return deliveryResult{}, consumererror.NewPermanent(err)
 	}
 	request.Header.Set("Content-Type", "application/x-protobuf")
 	response, err := delivery.client.Do(request)
 	if err != nil {
-		return deliveryResult{}, true, err
+		return deliveryResult{}, err
 	}
 	defer func() {
 		_ = response.Body.Close()
 	}()
 	raw, err := io.ReadAll(io.LimitReader(response.Body, 1<<20+1))
 	if err != nil {
-		return deliveryResult{}, true, err
+		return deliveryResult{}, err
 	}
 	if len(raw) > 1<<20 {
-		return deliveryResult{}, true, errors.New("accountable_delivery response exceeds 1 MiB")
+		return deliveryResult{}, consumererror.NewPermanent(errors.New("accountable_delivery response exceeds 1 MiB"))
 	}
 	if response.StatusCode != http.StatusOK {
 		classified := consumererror.NewOTLPHTTPError(fmt.Errorf("grafana OTLP HTTP status %d", response.StatusCode), response.StatusCode)
 		var consumerError *consumererror.Error
 		retryable := errors.As(classified, &consumerError) && consumerError.IsRetryable()
-		return deliveryResult{}, retryable, classified
+		if !retryable {
+			return deliveryResult{}, consumererror.NewPermanent(classified)
+		}
+		if delay := retryAfter(response.Header.Get("Retry-After"), delivery.clock.Now()); delay > 0 {
+			return deliveryResult{}, exporterhelper.NewThrottleRetry(classified, delay)
+		}
+		return deliveryResult{}, classified
 	}
 	rejected, err := delivery.signal.decodeResponse(raw)
 	if err != nil {
-		return deliveryResult{}, true, fmt.Errorf("decode Grafana OTLP response: %w", err)
+		return deliveryResult{}, consumererror.NewPermanent(fmt.Errorf("decode Grafana OTLP response: %w", err))
 	}
 	if rejected < 0 || rejected > entry.itemCount {
-		return deliveryResult{}, true, errors.New("grafana OTLP partial success has an invalid rejected item count")
+		return deliveryResult{}, consumererror.NewPermanent(errors.New("grafana OTLP partial success has an invalid rejected item count"))
 	}
-	return deliveryResult{sent: entry.itemCount - rejected, dropped: rejected}, false, nil
+	return deliveryResult{sent: entry.itemCount - rejected, dropped: rejected}, nil
+}
+
+func retryAfter(value string, now time.Time) time.Duration {
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	when, err := http.ParseTime(value)
+	if err != nil || !when.After(now) {
+		return 0
+	}
+	return when.Sub(now)
 }
 
 func (delivery *accountableDelivery) complete(entry deliveryEntry, result deliveryResult, deliveryError error) {
@@ -524,15 +659,17 @@ func (delivery *accountableDelivery) complete(entry deliveryEntry, result delive
 }
 
 func (delivery *accountableDelivery) Shutdown(ctx context.Context) error {
+	drainContext, cancelDrain := context.WithTimeout(ctx, deliveryDrainTimeout)
+	defer cancelDrain()
 	delivery.mutex.Lock()
 	if delivery.shutdown {
 		done := delivery.done
 		delivery.mutex.Unlock()
 		select {
 		case <-done:
-			return delivery.validateCompleteDelivery()
-		case <-ctx.Done():
-			return fmt.Errorf("accountable_delivery shutdown: %w", context.Cause(ctx))
+			return errors.Join(delivery.stopRetry(drainContext), delivery.validateCompleteDelivery())
+		case <-drainContext.Done():
+			return fmt.Errorf("accountable_delivery shutdown: %w", context.Cause(drainContext))
 		}
 	}
 	delivery.shutdown = true
@@ -548,23 +685,36 @@ func (delivery *accountableDelivery) Shutdown(ctx context.Context) error {
 	select {
 	case <-done:
 		delivery.cancel()
-		delivery.client.CloseIdleConnections()
-		delivery.unregisterMetrics()
-		return delivery.validateCompleteDelivery()
-	case <-ctx.Done():
+		delivery.cleanupResources()
+		return errors.Join(delivery.stopRetry(drainContext), delivery.validateCompleteDelivery())
+	case <-drainContext.Done():
 		delivery.cancel()
+		_ = delivery.stopRetry(context.Background())
 		delivery.condition.Broadcast()
-		<-done
-		delivery.client.CloseIdleConnections()
-		delivery.unregisterMetrics()
-		return fmt.Errorf("accountable_delivery shutdown left unconfirmed items: %w", context.Cause(ctx))
+		delivery.cleanupResources()
+		delivery.reportAccountingUncertain()
+		return fmt.Errorf("accountable_delivery shutdown left unconfirmed items: %w", context.Cause(drainContext))
 	}
 }
 
-func (delivery *accountableDelivery) DeliveryCounters() DeliveryCounters {
+func (delivery *accountableDelivery) stopRetry(ctx context.Context) error {
+	delivery.retryOnce.Do(func() {
+		delivery.retryErr = delivery.retryStop(ctx)
+	})
+	return delivery.retryErr
+}
+
+func (delivery *accountableDelivery) cleanupResources() {
+	delivery.cleanup.Do(func() {
+		delivery.client.CloseIdleConnections()
+		delivery.unregisterMetrics()
+	})
+}
+
+func (delivery *accountableDelivery) DeliveryCounters() telemetry.DeliveryCounters {
 	delivery.mutex.Lock()
 	defer delivery.mutex.Unlock()
-	counters := DeliveryCounters{
+	counters := telemetry.DeliveryCounters{
 		AcceptedItemCount:           delivery.accepted,
 		SentItemCount:               delivery.sent,
 		PermanentlyDroppedItemCount: delivery.dropped,
@@ -581,10 +731,8 @@ func (delivery *accountableDelivery) DeliveryCounters() DeliveryCounters {
 }
 
 func (delivery *accountableDelivery) validateConservation() error {
-	if err := ValidateDeliveryCounters(delivery.DeliveryCounters()); err != nil {
-		if delivery.settings.Logger != nil {
-			delivery.settings.Logger.Error("telemetry.accounting_uncertain")
-		}
+	if err := telemetry.ValidateDeliveryCounters(delivery.DeliveryCounters()); err != nil {
+		delivery.reportAccountingUncertain()
 		return fmt.Errorf("accountable_delivery accounting is uncertain: %w", err)
 	}
 	return nil
@@ -596,12 +744,24 @@ func (delivery *accountableDelivery) validateCompleteDelivery() error {
 	}
 	if delivery.DeliveryCounters().PendingItemCount != 0 {
 		err := errors.New("accepted items do not have confirmed terminal outcomes")
-		if delivery.settings.Logger != nil {
-			delivery.settings.Logger.Error("telemetry.accounting_uncertain")
-		}
+		delivery.reportAccountingUncertain()
 		return fmt.Errorf("accountable_delivery accounting is uncertain: %w", err)
 	}
 	return nil
+}
+
+// reportAccountingUncertain writes the fixed safe record that the CloudWatch
+// metric filter selects. It goes to stdout through the shared safe writer, so it
+// survives complete exporter failure and keeps one owner for the field names.
+func (delivery *accountableDelivery) reportAccountingUncertain() {
+	_ = delivery.safeLogger.EmitPreVerification(
+		context.Background(),
+		"telemetry.accounting_uncertain",
+		map[string]string{
+			telemetry.StdoutFieldEnvironment: delivery.config.Environment,
+			telemetry.StdoutFieldCellID:      delivery.config.CellID,
+		},
+	)
 }
 
 func (delivery *accountableDelivery) registerMetrics() error {

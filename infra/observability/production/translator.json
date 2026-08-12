@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "account_id": "576329195663",
+  "region": "eu-west-2",
+  "environment": "production",
+  "input_topic_arn": "arn:aws:sns:eu-west-2:576329195663:accountable-production-observability-alarm-input",
+  "critical_topic_arn": "arn:aws:sns:eu-west-2:576329195663:accountable-production-observability-critical",
+  "warning_topic_arn": "arn:aws:sns:eu-west-2:576329195663:accountable-production-observability-warning",
+  "proof_topic_arn": "arn:aws:sns:eu-west-2:576329195663:accountable-production-observability-proof"
+}

@@ -1,4 +1,4 @@
-package telemetry
+package delivery
 
 import (
 	"context"
@@ -10,9 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"go.opentelemetry.io/collector/component"
+	"github.com/acctbl/accountable/internal/platform/telemetry"
 	"go.opentelemetry.io/collector/config/configretry"
 	"go.opentelemetry.io/collector/exporter"
+	"go.opentelemetry.io/collector/exporter/exportertest"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -22,7 +23,7 @@ import (
 )
 
 type deliveryCounterReader interface {
-	DeliveryCounters() DeliveryCounters
+	DeliveryCounters() telemetry.DeliveryCounters
 }
 
 func TestAccountableDeliveryExportsAcceptedSpans(t *testing.T) {
@@ -69,7 +70,7 @@ func TestAccountableDeliveryExportsAcceptedSpans(t *testing.T) {
 	if got := (<-received).SpanCount(); got != 3 {
 		t.Fatalf("received %d spans", got)
 	}
-	assertDeliveryCounters(t, created, DeliveryCounters{AcceptedItemCount: 3, SentItemCount: 3})
+	assertDeliveryCounters(t, created, telemetry.DeliveryCounters{AcceptedItemCount: 3, SentItemCount: 3})
 }
 
 func TestAccountableDeliveryRetriesBeforeRecordingSuccess(t *testing.T) {
@@ -103,7 +104,7 @@ func TestAccountableDeliveryRetriesBeforeRecordingSuccess(t *testing.T) {
 	if got := attempts.Load(); got != 2 {
 		t.Fatalf("attempts = %d", got)
 	}
-	assertDeliveryCounters(t, created, DeliveryCounters{AcceptedItemCount: 2, SentItemCount: 2})
+	assertDeliveryCounters(t, created, telemetry.DeliveryCounters{AcceptedItemCount: 2, SentItemCount: 2})
 }
 
 func TestAccountableDeliveryRecordsPartialSuccess(t *testing.T) {
@@ -131,7 +132,7 @@ func TestAccountableDeliveryRecordsPartialSuccess(t *testing.T) {
 	if err := created.Shutdown(shutdownContext); err != nil {
 		t.Fatal(err)
 	}
-	assertDeliveryCounters(t, created, DeliveryCounters{
+	assertDeliveryCounters(t, created, telemetry.DeliveryCounters{
 		AcceptedItemCount:           5,
 		SentItemCount:               3,
 		PermanentlyDroppedItemCount: 2,
@@ -161,7 +162,7 @@ func TestAccountableDeliveryRecordsFinalRetryFailure(t *testing.T) {
 	if got := attempts.Load(); got < 2 {
 		t.Fatalf("attempts = %d", got)
 	}
-	assertDeliveryCounters(t, created, DeliveryCounters{
+	assertDeliveryCounters(t, created, telemetry.DeliveryCounters{
 		AcceptedItemCount:           4,
 		PermanentlyDroppedItemCount: 4,
 	})
@@ -170,6 +171,12 @@ func TestAccountableDeliveryRecordsFinalRetryFailure(t *testing.T) {
 func TestAccountableDeliveryRefusesQueueOverflowWithoutAcceptingIt(t *testing.T) {
 	requestStarted := make(chan struct{})
 	releaseRequest := make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(releaseRequest)
+		}
+	}()
 	backend := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		select {
 		case <-requestStarted:
@@ -195,14 +202,15 @@ func TestAccountableDeliveryRefusesQueueOverflowWithoutAcceptingIt(t *testing.T)
 	if err := created.ConsumeTraces(context.Background(), tracesWithSpanCount(1)); err == nil {
 		t.Fatal("queue overflow was accepted")
 	}
-	assertDeliveryCounters(t, created, DeliveryCounters{AcceptedItemCount: 3, PendingItemCount: 3})
+	assertDeliveryCounters(t, created, telemetry.DeliveryCounters{AcceptedItemCount: 3, PendingItemCount: 3})
 	close(releaseRequest)
+	released = true
 	shutdownContext, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := created.Shutdown(shutdownContext); err != nil {
 		t.Fatal(err)
 	}
-	assertDeliveryCounters(t, created, DeliveryCounters{AcceptedItemCount: 3, SentItemCount: 3})
+	assertDeliveryCounters(t, created, telemetry.DeliveryCounters{AcceptedItemCount: 3, SentItemCount: 3})
 }
 
 func TestAccountableDeliveryShutdownLeavesUnconfirmedItemsPending(t *testing.T) {
@@ -268,7 +276,7 @@ func TestAccountableDeliveryCrashCannotInventTerminalOutcomes(t *testing.T) {
 	if err := created.Shutdown(shutdownContext); err == nil {
 		t.Fatal("unconfirmed crash state allowed a clean shutdown")
 	}
-	assertDeliveryCounters(t, created, DeliveryCounters{AcceptedItemCount: 2, PendingItemCount: 2})
+	assertDeliveryCounters(t, created, telemetry.DeliveryCounters{AcceptedItemCount: 2, PendingItemCount: 2})
 }
 
 func TestAccountableDeliveryExportsMetricsAndLogs(t *testing.T) {
@@ -302,7 +310,7 @@ func TestAccountableDeliveryExportsMetricsAndLogs(t *testing.T) {
 	}))
 	t.Cleanup(backend.Close)
 
-	factory := NewAccountableDeliveryFactory()
+	factory := NewFactory()
 	metricsConfig := testDeliveryConfig(factory, backend.URL, 10, testRetryConfig())
 	metricsExporter, err := factory.CreateMetrics(context.Background(), testExporterSettings(factory), metricsConfig)
 	if err != nil {
@@ -339,13 +347,13 @@ func TestAccountableDeliveryExportsMetricsAndLogs(t *testing.T) {
 	if got := <-receivedLogs; got != 3 {
 		t.Fatalf("received %d log records", got)
 	}
-	assertDeliveryCounters(t, metricsExporter, DeliveryCounters{AcceptedItemCount: 2, SentItemCount: 2})
-	assertDeliveryCounters(t, logsExporter, DeliveryCounters{AcceptedItemCount: 3, SentItemCount: 3})
+	assertDeliveryCounters(t, metricsExporter, telemetry.DeliveryCounters{AcceptedItemCount: 2, SentItemCount: 2})
+	assertDeliveryCounters(t, logsExporter, telemetry.DeliveryCounters{AcceptedItemCount: 3, SentItemCount: 3})
 }
 
 func createTestTracesExporter(t *testing.T, endpoint string, queueSize int, retry configretry.BackOffConfig) exporter.Traces {
 	t.Helper()
-	factory := NewAccountableDeliveryFactory()
+	factory := NewFactory()
 	config := testDeliveryConfig(factory, endpoint, queueSize, retry)
 	created, err := factory.CreateTraces(context.Background(), testExporterSettings(factory), config)
 	if err != nil {
@@ -367,9 +375,7 @@ func testDeliveryConfig(factory exporter.Factory, endpoint string, queueSize int
 }
 
 func testExporterSettings(factory exporter.Factory) exporter.Settings {
-	return exporter.Settings{
-		ID: component.NewID(factory.Type()),
-	}
+	return exportertest.NewNopSettings(factory.Type())
 }
 
 func testRetryConfig() configretry.BackOffConfig {
@@ -408,7 +414,7 @@ func logsWithRecordCount(count int) plog.Logs {
 	return logs
 }
 
-func assertDeliveryCounters(t *testing.T, exporterComponent any, want DeliveryCounters) {
+func assertDeliveryCounters(t *testing.T, exporterComponent any, want telemetry.DeliveryCounters) {
 	t.Helper()
 	got := exporterComponent.(deliveryCounterReader).DeliveryCounters()
 	if got != want {

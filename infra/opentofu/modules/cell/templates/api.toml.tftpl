@@ -9,13 +9,37 @@ foundation_check_timeout = "30s"
 readiness_probe_interval = "10s"
 
 [capabilities]
-architecture_probe = true
+architecture_probe = ${architecture_probe}
 postgres = true
 secrets = true
 kms = true
 object_storage = true
-telemetry = false
+telemetry = true
 redpanda = false
+
+[telemetry]
+collector_endpoint = "${collector_endpoint}"
+protocol = "otlp_http"
+sampling_policy = "parent_based_5pct_v1"
+redaction_policy_version = "allowlist_v1"
+
+[client_telemetry]
+release_id = "${web_release_id}"
+web_asset_digest = "${web_asset_digest}"
+configuration_schema_version = 1
+configuration_revision = "${web_config_revision}"
+configuration_fingerprint = "${web_config_fingerprint}"
+proof_key_active_ref = "proof-key-active"
+proof_key_standby_ref = "proof-key-standby"
+%{ if previous_web_identity != null ~}
+
+[client_telemetry.previous]
+release_id = "${previous_web_identity.release_id}"
+web_asset_digest = "${previous_web_identity.web_asset_digest}"
+configuration_schema_version = ${previous_web_identity.configuration_schema_version}
+configuration_revision = "${previous_web_identity.configuration_revision}"
+configuration_fingerprint = "${previous_web_identity.configuration_fingerprint}"
+%{ endif ~}
 
 [server]
 listen_address = "0.0.0.0:8080"

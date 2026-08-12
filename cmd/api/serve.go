@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,8 +22,9 @@ import (
 	"github.com/acctbl/accountable/internal/modules/probe"
 	"github.com/acctbl/accountable/internal/modules/system"
 	"github.com/acctbl/accountable/internal/platform/clock"
+	"github.com/acctbl/accountable/internal/platform/secret"
+	"github.com/acctbl/accountable/internal/platform/telemetry"
 	"github.com/acctbl/accountable/internal/server"
-	"github.com/google/uuid"
 )
 
 const (
@@ -46,35 +49,64 @@ type readiness struct{ ready atomic.Bool }
 func (r *readiness) Set(value bool) { r.ready.Store(value) }
 func (r *readiness) IsReady() bool  { return r.ready.Load() }
 
-func newAPIHandler(config config, ready *readiness) http.Handler {
+func newAPIHandler(
+	config config,
+	ready *readiness,
+	release telemetry.RuntimeRelease,
+	signals *runtimeSignals,
+) http.Handler {
 	return newAPIHandlerWithSystem(
 		config,
 		ready,
-		system.NewSystemServer(clock.System{}, config.Foundation.Revision),
+		release,
+		signals,
+		system.NewSystemServer(clock.System{}, release.ReleaseID),
 	)
 }
 
 func newAPIHandlerWithSystem(
 	config config,
 	ready *readiness,
+	release telemetry.RuntimeRelease,
+	signals *runtimeSignals,
 	systemServer systemv1connect.SystemServiceHandler,
 ) http.Handler {
 	mux := http.NewServeMux()
-	releaseID := config.Foundation.Revision
-	mux.HandleFunc("GET /_health/live", healthHandler(releaseID, func() bool { return true }))
-	mux.HandleFunc("GET /_health/ready", healthHandler(releaseID, ready.IsReady))
+	identity := healthIdentity{
+		ReleaseID:      release.ReleaseID,
+		ServiceVersion: release.ServiceVersion,
+		Configuration: telemetry.ConfigIdentity{
+			SchemaVersion: config.Foundation.SchemaVersion,
+			Revision:      config.Foundation.Revision,
+			Fingerprint:   config.Foundation.Fingerprint,
+		},
+	}
+	mux.HandleFunc("GET /_health/live", healthHandler(identity, func() bool { return true }))
+	mux.HandleFunc("GET /_health/ready", healthHandler(identity, ready.IsReady))
+	if signals != nil && signals.client != nil {
+		mux.Handle("POST /telemetry/v1", clientTelemetryBoundary(clock.System{}, signals.client.Handle(config.AllowedOrigins)))
+	}
 
 	boundary := server.BoundaryInterceptor{}
+	var recorder *telemetry.Recorder
+	var safeLogger *telemetry.SafeLogger
+	if signals != nil {
+		recorder, safeLogger = signals.recorder, signals.logger
+	}
+	signalInterceptor := server.SignalInterceptor{Recorder: recorder, Logger: safeLogger}
 	deadline := server.DeadlineInterceptor{
 		Unary:  config.UnaryRPCDeadline,
 		Stream: config.StreamRPCDeadline,
 	}
 	availability := server.AvailabilityInterceptor{Ready: ready.IsReady}
 	recoverPanic := func(ctx context.Context, _ connect.Spec, _ http.Header, _ any) error {
+		if safeLogger != nil {
+			_ = safeLogger.Emit(ctx, slog.LevelError, "request.panic_recovered", nil)
+		}
 		return apierror.New(ctx, apierror.InternalFailure, "errors.internal", nil, 0)
 	}
 	ordinaryOptions := []connect.HandlerOption{
-		connect.WithInterceptors(boundary, availability, deadline),
+		connect.WithInterceptors(boundary, signalInterceptor, availability, deadline),
 		connect.WithRecover(recoverPanic),
 		connect.WithReadMaxBytes(ordinaryMessageMaxBytes),
 		connect.WithSendMaxBytes(ordinaryMessageMaxBytes),
@@ -86,7 +118,7 @@ func newAPIHandlerWithSystem(
 
 	if config.ArchitectureProbe {
 		probeOptions := []connect.HandlerOption{
-			connect.WithInterceptors(boundary, availability, deadline),
+			connect.WithInterceptors(boundary, signalInterceptor, availability, deadline),
 			connect.WithRecover(recoverPanic),
 			connect.WithReadMaxBytes(streamMessageMaxBytes),
 			connect.WithSendMaxBytes(streamMessageMaxBytes),
@@ -102,23 +134,51 @@ func newAPIHandlerWithSystem(
 	return credentialedCORSMiddleware(config.AllowedOrigins, handler)
 }
 
-type healthResponse struct {
-	Status    string `json:"status"`
-	ReleaseID string `json:"release_id"`
-	RequestID string `json:"request_id"`
+// healthIdentity keeps release, artifact, and configuration identity separate.
+// No field is derived from another field.
+type healthIdentity struct {
+	ReleaseID      string
+	ServiceVersion string
+	Configuration  telemetry.ConfigIdentity
 }
 
-func healthHandler(releaseID string, healthy func() bool) http.HandlerFunc {
+type healthResponse struct {
+	Status                     string `json:"status"`
+	ReleaseID                  string `json:"release_id"`
+	ServiceVersion             string `json:"service_version"`
+	ConfigurationSchemaVersion int    `json:"configuration_schema_version"`
+	ConfigurationRevision      string `json:"configuration_revision"`
+	ConfigurationFingerprint   string `json:"configuration_fingerprint"`
+	RequestID                  string `json:"request_id"`
+	CorrelationID              string `json:"correlation_id"`
+}
+
+// healthHandler answers with the complete runtime identity. A health call starts
+// one root journey, so its correlation ID equals its request ID.
+func healthHandler(identity healthIdentity, healthy func() bool) http.HandlerFunc {
 	return func(response http.ResponseWriter, _ *http.Request) {
 		response.Header().Set("Cache-Control", "no-store")
 		response.Header().Set("Content-Type", "application/json")
-		requestID, err := uuid.NewV7()
+		requestID, err := telemetry.NewWorkID()
 		if err != nil {
-			requestID = uuid.Nil
+			response.Header().Set("Retry-After", "1")
+			response.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = response.Write([]byte(`{"code":"unavailable","message_key":"errors.unavailable"}`))
+			return
 		}
-		response.Header().Set("X-Request-ID", requestID.String())
+		response.Header().Set(telemetry.HeaderRequestID, requestID)
+		response.Header().Set(telemetry.HeaderCorrelationID, requestID)
 		status := http.StatusOK
-		payload := healthResponse{Status: "ok", ReleaseID: releaseID, RequestID: requestID.String()}
+		payload := healthResponse{
+			Status:                     "ok",
+			ReleaseID:                  identity.ReleaseID,
+			ServiceVersion:             identity.ServiceVersion,
+			ConfigurationSchemaVersion: identity.Configuration.SchemaVersion,
+			ConfigurationRevision:      identity.Configuration.Revision,
+			ConfigurationFingerprint:   identity.Configuration.Fingerprint,
+			RequestID:                  requestID,
+			CorrelationID:              requestID,
+		}
 		if !healthy() {
 			status = http.StatusServiceUnavailable
 			payload.Status = "not_ready"
@@ -162,11 +222,17 @@ func credentialedCORSMiddleware(origins []string, next http.Handler) http.Handle
 		if _, ok := allowed[origin]; origin != "" && ok {
 			response.Header().Set("Access-Control-Allow-Origin", origin)
 			response.Header().Set("Access-Control-Allow-Credentials", "true")
-			response.Header().Set("Access-Control-Expose-Headers", "X-Request-ID, X-Trace-ID, Grpc-Status, Grpc-Message")
+			response.Header().Set(
+				"Access-Control-Expose-Headers",
+				"X-Request-ID, X-Correlation-ID, Grpc-Status, Grpc-Message",
+			)
 			response.Header().Add("Vary", "Origin")
 			if request.Method == http.MethodOptions {
 				response.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-				response.Header().Set("Access-Control-Allow-Headers", "Accept-Language, Connect-Protocol-Version, Connect-Timeout-Ms, Content-Type, X-Trace-ID")
+				response.Header().Set(
+					"Access-Control-Allow-Headers",
+					"Accept-Language, Connect-Protocol-Version, Connect-Timeout-Ms, Content-Type, X-Correlation-ID",
+				)
 				response.Header().Set("Access-Control-Max-Age", "600")
 				response.WriteHeader(http.StatusNoContent)
 				return
@@ -188,15 +254,27 @@ func newHTTPServer(addr string, handler http.Handler) *http.Server {
 	}
 }
 
-func serve(ctx context.Context, config config) error {
-	return bootstrapAndServe(
+func serve(ctx context.Context, config config, release telemetry.RuntimeRelease) error {
+	signals, err := startSignals(ctx, config, release)
+	if err != nil {
+		return err
+	}
+	served := bootstrapAndServe(
 		ctx,
 		config,
+		release,
+		signals,
 		func(ctx context.Context, config bootstrap.Config) (ownedDependencySet, error) {
-			return bootstrap.Build(ctx, config)
+			return bootstrap.Build(ctx, config, signals.recorder)
 		},
 		serveWithDependencies,
 	)
+	// An unconfirmed flush is a telemetry loss, so it decides the exit status
+	// when the request path itself finished cleanly.
+	if flushed := signals.stop(context.WithoutCancel(ctx)); served == nil {
+		return flushed
+	}
+	return served
 }
 
 type ownedDependencySet interface {
@@ -207,30 +285,92 @@ type ownedDependencySet interface {
 func bootstrapAndServe(
 	ctx context.Context,
 	config config,
+	release telemetry.RuntimeRelease,
+	signals *runtimeSignals,
 	build func(context.Context, bootstrap.Config) (ownedDependencySet, error),
-	serve func(context.Context, config, dependencySet) error,
+	serve func(context.Context, config, telemetry.RuntimeRelease, *runtimeSignals, dependencySet) error,
 ) error {
 	dependencies, err := build(ctx, config.Foundation)
 	if err != nil {
 		return err
 	}
 	defer dependencies.Close()
-	return serve(ctx, config, dependencies)
+	return serve(ctx, config, release, signals, dependencies)
 }
 
 type dependencySet interface {
 	Ping(context.Context) error
 }
 
-func serveWithDependencies(ctx context.Context, config config, dependencies dependencySet) error {
+func serveWithDependencies(
+	ctx context.Context,
+	config config,
+	release telemetry.RuntimeRelease,
+	signals *runtimeSignals,
+	dependencies dependencySet,
+) error {
+	if signals.recorder != nil {
+		activeRef, err := secret.ParseRef(config.ProofKeyActiveRef)
+		if err != nil {
+			return err
+		}
+		source, err := secret.NewSource(ctx, config.Foundation.Secrets)
+		if err != nil {
+			return err
+		}
+		values, err := source.ResolveBatch(ctx, []secret.Ref{activeRef})
+		if err != nil {
+			return err
+		}
+		activeValue, ok := values[activeRef]
+		if !ok {
+			return errors.New("the active proof key is unavailable")
+		}
+		standbyKey := ""
+		if config.ProofKeyStandbyRef != "" {
+			standbyRef, parseErr := secret.ParseRef(config.ProofKeyStandbyRef)
+			if parseErr != nil {
+				return parseErr
+			}
+			optionalSource, ok := source.(secret.OptionalSecretSource)
+			if !ok {
+				return errors.New("optional proof key resolution is unavailable")
+			}
+			standbyValue, present, resolveErr := optionalSource.ResolveOptional(ctx, standbyRef)
+			if resolveErr != nil {
+				return resolveErr
+			}
+			if present {
+				standbyKey = string(standbyValue.Bytes())
+			}
+		}
+		nonces, ok := dependencies.(proofNonceClaimer)
+		if !ok {
+			return errors.New("proof nonce storage is unavailable")
+		}
+		client, err := newClientTelemetryService(
+			config.ClientTelemetry, config.PreviousClientTelemetry, release, signals.recorder, signals.logger,
+			string(activeValue.Bytes()), standbyKey, nonces, clock.System{},
+		)
+		if err != nil {
+			return err
+		}
+		signals.client = client
+		defer func() {
+			drainCtx, cancel := context.WithTimeout(context.Background(), clientTelemetryDrain)
+			defer cancel()
+			_ = client.Shutdown(drainCtx)
+		}()
+	}
 	ready := &readiness{}
-	srv := newHTTPServer(config.Addr, newAPIHandler(config, ready))
-	listener, err := net.Listen("tcp", config.Addr)
-	if err != nil {
-		return err
+	srv := newHTTPServer(config.Addr, newAPIHandler(config, ready, release, signals))
+	listener, listenErr := net.Listen("tcp", config.Addr)
+	if listenErr != nil {
+		return listenErr
 	}
 	limited := newLimitListener(listener, maxConnections)
 	ready.Set(true)
+	signals.ready(ctx)
 	log.Printf("listening on %s", listener.Addr())
 
 	errCh := make(chan error, 1)
@@ -269,6 +409,84 @@ func serveWithDependencies(ctx context.Context, config config, dependencies depe
 		}
 		return <-errCh
 	}
+}
+
+// runtimeSignals owns the process telemetry for the API lifetime.
+type runtimeSignals struct {
+	providers *telemetry.Providers
+	recorder  *telemetry.Recorder
+	logger    *telemetry.SafeLogger
+	client    *clientTelemetryService
+}
+
+// startSignals verifies runtime identity, starts every provider, and reports the
+// starting and ready events. Telemetry is required in a managed environment and
+// optional for a local run.
+func startSignals(
+	ctx context.Context,
+	config config,
+	release telemetry.RuntimeRelease,
+) (*runtimeSignals, error) {
+	identity := telemetry.RuntimeIdentity{
+		Release: release,
+		Config: telemetry.ConfigIdentity{
+			SchemaVersion: config.Foundation.SchemaVersion,
+			Revision:      config.Foundation.Revision,
+			Fingerprint:   config.Foundation.Fingerprint,
+		},
+		Environment: config.Foundation.Environment,
+		CellID:      config.Foundation.CellID,
+		RuntimeRole: config.Foundation.RuntimeRole,
+	}
+	if !config.Foundation.Capabilities.Telemetry {
+		return &runtimeSignals{}, nil
+	}
+	resource, err := telemetry.BuildProcessResource(identity)
+	if err != nil {
+		return nil, err
+	}
+	providers, err := telemetry.NewProviders(ctx, telemetry.ProviderOptions{
+		Identity: identity,
+		Config:   config.Foundation.Telemetry,
+	})
+	if err != nil {
+		return nil, err
+	}
+	// The safe logger writes to stdout and appends the same record to the log
+	// provider through the OpenTelemetry bridge.
+	logger := telemetry.NewSafeLogger(telemetry.SafeLoggerOptions{
+		Stdout:   os.Stdout,
+		Resource: resource,
+		Bridge:   slog.New(providers.BridgeHandler()),
+	})
+	recorder, err := telemetry.NewRecorder(providers)
+	if err != nil {
+		return nil, err
+	}
+	_ = logger.Emit(ctx, slog.LevelInfo, "runtime.starting", nil)
+	return &runtimeSignals{providers: providers, recorder: recorder, logger: logger}, nil
+}
+
+// ready reports that the listener is open and the process accepts traffic.
+func (signals *runtimeSignals) ready(ctx context.Context) {
+	if signals.logger == nil {
+		return
+	}
+	_ = signals.logger.Emit(ctx, slog.LevelInfo, "runtime.ready", nil)
+}
+
+// stop flushes every provider inside the bounded budget. An export failure is
+// reported through the safe stdout path and never hides a request failure.
+func (signals *runtimeSignals) stop(ctx context.Context) error {
+	if signals.providers == nil {
+		return nil
+	}
+	_ = signals.logger.Emit(ctx, slog.LevelInfo, "runtime.stopping", nil)
+	if err := signals.providers.Shutdown(ctx); err != nil {
+		_ = signals.logger.Emit(ctx, slog.LevelError, "telemetry.export_failed", nil)
+		return err
+	}
+	return nil
 }
 
 func monitorDependencies(

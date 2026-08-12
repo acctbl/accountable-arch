@@ -13,6 +13,7 @@ import (
 	"github.com/acctbl/accountable/internal/platform/features"
 	"github.com/acctbl/accountable/internal/platform/secret"
 	"github.com/acctbl/accountable/internal/platform/storage"
+	"github.com/acctbl/accountable/internal/platform/telemetry"
 )
 
 var ErrFoundationUnavailable = errors.New("foundation dependencies are unavailable")
@@ -32,7 +33,10 @@ type Dependencies struct {
 	maximumDBSkew time.Duration
 }
 
-func Build(ctx context.Context, config Config) (*Dependencies, error) {
+// Build opens every dependency. The recorder is optional so a local run without
+// telemetry keeps working, and it carries the database instrumentation when the
+// process enables telemetry.
+func Build(ctx context.Context, config Config, recorder *telemetry.Recorder) (*Dependencies, error) {
 	timeSource := clock.Clock(clock.System{})
 	timeHealth := clock.Health(clock.SystemHealth{})
 	if config.Time.Provider == TimeProviderLinux {
@@ -52,7 +56,7 @@ func Build(ctx context.Context, config Config) (*Dependencies, error) {
 	}
 	var db *database.Database
 	if config.Capabilities.Postgres {
-		db, err = database.OpenDatabase(ctx, config.Database, resolver)
+		db, err = database.OpenDatabase(ctx, config.Database, resolver, recorder)
 		if err != nil {
 			return nil, err
 		}
@@ -144,8 +148,15 @@ func (d *Dependencies) Close() {
 	}
 }
 
+func (d *Dependencies) ClaimProofNonce(ctx context.Context, nonce string, expiresAt time.Time) (bool, error) {
+	if d.Database == nil {
+		return false, ErrFoundationUnavailable
+	}
+	return d.Database.ClaimProofNonce(ctx, nonce, expiresAt)
+}
+
 func Preflight(ctx context.Context, config Config) (PreflightReport, error) {
-	dependencies, err := Build(ctx, config)
+	dependencies, err := Build(ctx, config, nil)
 	if err != nil {
 		return PreflightReport{}, err
 	}

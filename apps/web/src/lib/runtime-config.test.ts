@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadRuntimeConfig, parseRuntimeConfig } from "./runtime-config";
 
 const valid = {
@@ -7,6 +7,10 @@ const valid = {
 	architecture_probe: false,
 	configuration_revision: "local-test",
 };
+
+afterEach(() => {
+	Reflect.deleteProperty(window, "__ACCOUNTABLE_RUNTIME_CONFIG__");
+});
 
 describe("runtime config", () => {
 	it("accepts the strict public schema", () => {
@@ -50,11 +54,24 @@ describe("runtime config", () => {
 				headers: { "Content-Type": "application/json" },
 			}),
 		);
-		await expect(loadRuntimeConfig(fetcher)).resolves.toEqual(valid);
+		await expect(loadRuntimeConfig(fetcher)).resolves.toMatchObject({
+			...valid,
+			configurationFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+		});
 		expect(fetcher).toHaveBeenCalledWith("/_runtime/config.json", {
 			cache: "no-store",
 			credentials: "same-origin",
 			headers: { Accept: "application/json" },
 		});
+	});
+
+	it("fetches exact bytes even when an inline config exists", async () => {
+		window.__ACCOUNTABLE_RUNTIME_CONFIG__ = valid;
+		const fetcher = vi
+			.fn<typeof fetch>()
+			.mockResolvedValue(new Response(JSON.stringify(valid), { status: 200 }));
+		await expect(loadRuntimeConfig(fetcher)).resolves.toMatchObject(valid);
+		expect(fetcher).toHaveBeenCalledOnce();
+		Reflect.deleteProperty(window, "__ACCOUNTABLE_RUNTIME_CONFIG__");
 	});
 });

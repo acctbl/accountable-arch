@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/url"
 	"os"
@@ -16,8 +17,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/acctbl/accountable/internal/appconfig"
 	"github.com/acctbl/accountable/internal/configfile"
 	"github.com/acctbl/accountable/internal/platform/secret"
+	"github.com/acctbl/accountable/internal/platform/telemetry"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -36,6 +39,7 @@ var (
 	awsRegionPattern     = regexp.MustCompile(`^[a-z]{2}(?:-gov)?-[a-z]+-\d$`)
 	awsKMSKeyARNPattern  = regexp.MustCompile(`^arn:aws(?:-us-gov)?:kms:[a-z0-9-]+:[0-9]{12}:key/[A-Za-z0-9-]+$`)
 	parameterPathPattern = regexp.MustCompile(`^(?:/[A-Za-z0-9._-]+){1,13}$`)
+	cellIDPattern        = regexp.MustCompile(`^[a-z][a-z0-9-]{2,15}$`)
 )
 
 type config struct {
@@ -44,14 +48,28 @@ type config struct {
 	environment    string
 	migrateSecrets secret.Config
 	region         string
+	cellID         string
+	identity       telemetry.ConfigIdentity
+	telemetry      telemetry.RuntimeConfig
 }
 
 type fileConfig struct {
-	AWSRegion     string `toml:"aws_region"`
-	DatabaseHost  string `toml:"database_host"`
-	Environment   string `toml:"environment"`
-	KMSKeyARN     string `toml:"kms_key_arn"`
-	ParameterRoot string `toml:"parameter_root"`
+	SchemaVersion int                  `toml:"schema_version"`
+	Revision      string               `toml:"revision"`
+	AWSRegion     string               `toml:"aws_region"`
+	CellID        string               `toml:"cell_id"`
+	DatabaseHost  string               `toml:"database_host"`
+	Environment   string               `toml:"environment"`
+	KMSKeyARN     string               `toml:"kms_key_arn"`
+	ParameterRoot string               `toml:"parameter_root"`
+	Telemetry     *telemetryFileConfig `toml:"telemetry"`
+}
+
+type telemetryFileConfig struct {
+	CollectorEndpoint      string `toml:"collector_endpoint"`
+	Protocol               string `toml:"protocol"`
+	SamplingPolicy         string `toml:"sampling_policy"`
+	RedactionPolicyVersion string `toml:"redaction_policy_version"`
 }
 
 func main() {
@@ -63,11 +81,34 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, args []string) error {
-	config, err := loadConfig(args)
+func run(ctx context.Context, args []string) (runErr error) {
+	configPath, releasePath, err := appconfig.RuntimePaths(args)
 	if err != nil {
 		return err
 	}
+	release, err := telemetry.ReadRuntimeRelease(releasePath)
+	if err != nil {
+		return err
+	}
+	config, err := loadConfig([]string{"--config", configPath})
+	if err != nil {
+		return err
+	}
+	// Bootstrap holds the master credential and creates every role, so its
+	// release identity is the one that matters most in an audit.
+	signals, err := telemetry.StartRuntime(ctx, telemetry.RuntimeIdentity{
+		Release:     release,
+		Config:      config.identity,
+		Environment: config.environment,
+		CellID:      config.cellID,
+		RuntimeRole: "bootstrap",
+	}, config.telemetry, config.telemetry.CollectorEndpoint != "")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		runErr = errors.Join(runErr, signals.Stop(context.WithoutCancel(ctx)))
+	}()
 	apiStore, err := secret.NewStore(ctx, config.apiSecrets)
 	if err != nil {
 		return errors.New("API secret store is unavailable")
@@ -97,6 +138,7 @@ func run(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Printf("database bootstrap: complete environment=%s\n", config.environment)
+	signals.Emit(ctx, slog.LevelInfo, "runtime.task_completed", nil)
 	return nil
 }
 
@@ -106,7 +148,8 @@ func loadConfig(args []string) (config, error) {
 		return config{}, err
 	}
 	var raw fileConfig
-	if err := configfile.Decode(configPath, &raw); err != nil {
+	fingerprint, err := configfile.DecodeWithFingerprint(configPath, &raw)
+	if err != nil {
 		return config{}, err
 	}
 	region := raw.AWSRegion
@@ -126,9 +169,33 @@ func loadConfig(args []string) (config, error) {
 			ParameterPath: parameterPath, KMSKeyARN: kmsKeyARN,
 		}
 	}
+	identity := telemetry.ConfigIdentity{
+		SchemaVersion: raw.SchemaVersion,
+		Revision:      raw.Revision,
+		Fingerprint:   fingerprint,
+	}
+	if err := telemetry.ValidateConfigIdentity(identity); err != nil {
+		return config{}, err
+	}
+	if !cellIDPattern.MatchString(raw.CellID) {
+		return config{}, errors.New("managed bootstrap cell_id is invalid")
+	}
+	var runtimeTelemetry telemetry.RuntimeConfig
+	if raw.Telemetry != nil {
+		runtimeTelemetry = telemetry.RuntimeConfig{
+			CollectorEndpoint:      raw.Telemetry.CollectorEndpoint,
+			Protocol:               raw.Telemetry.Protocol,
+			SamplingPolicy:         raw.Telemetry.SamplingPolicy,
+			RedactionPolicyVersion: raw.Telemetry.RedactionPolicyVersion,
+		}
+		if err := telemetry.ValidateRuntimeConfig(runtimeTelemetry); err != nil {
+			return config{}, err
+		}
+	}
 	return config{
 		apiSecrets: secretConfig(parameterRoot + "/api"), databaseHost: databaseHost, environment: environment,
 		migrateSecrets: secretConfig(parameterRoot + "/migrate"), region: region,
+		cellID: raw.CellID, identity: identity, telemetry: runtimeTelemetry,
 	}, nil
 }
 

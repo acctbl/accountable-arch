@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+case "${CAPACITY_TEST_CASE:?set CAPACITY_TEST_CASE}" in
+	malformed)
+		printf '{'
+		exit 0
+		;;
+	pass | fail | stale | missing | conflicting | incomplete) ;;
+	*) exit 2 ;;
+esac
+
+observed="${CAPACITY_OBSERVED_AT:?set CAPACITY_OBSERVED_AT}"
+conflicting="${CAPACITY_CONFLICTING_AT:?set CAPACITY_CONFLICTING_AT}"
+case "$CAPACITY_TEST_CASE" in
+	fail) tier=0 ;;
+	*) tier=1 ;;
+esac
+
+jq -n \
+	--arg observed "$observed" \
+	--arg conflicting "$conflicting" \
+	--arg test_case "$CAPACITY_TEST_CASE" \
+	--argjson tier "$tier" '
+  [
+    {id:"read", value:1}, {id:"tier", value:$tier}, {id:"fresh", value:1}, {id:"irm", value:0},
+    {id:"shared", value:50}, {id:"dev", value:10}, {id:"stage", value:15}, {id:"prod", value:25},
+    {id:"a0", value:20}, {id:"a1", value:20}, {id:"g0", value:20}, {id:"i0", value:20},
+    {id:"l0", value:20}, {id:"m0", value:20}, {id:"t0", value:20},
+    {id:"a2", value:10}, {id:"a3", value:10}, {id:"g1", value:10}, {id:"i1", value:10},
+    {id:"l1", value:10}, {id:"m1", value:10}, {id:"t1", value:10}
+  ]
+  | if $test_case == "missing" then map(select(.id != "t1")) else . end
+  | {
+      MetricDataResults: map({
+        Id:.id,
+        StatusCode:(if $test_case == "incomplete" and .id == "t1" then "PartialData" else "Complete" end),
+        Timestamps:[if $test_case == "conflicting" and .id == "t1" then $conflicting else $observed end],
+        Values:[.value]
+      })
+    }
+'

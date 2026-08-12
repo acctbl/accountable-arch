@@ -1,24 +1,32 @@
-name: Development cell runtime proof
+name: Cell runtime operation
 
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: Deployment environment
+        required: true
+        type: choice
+        options: [development, staging, production]
       cell:
-        description: Development cell root
+        description: Cell identifier
+        required: true
+        type: string
+      operation:
+        description: Protected runtime operation
         required: true
         type: choice
-        options:
-          - development-01
-          - proof-01
-      phase:
-        description: Runtime proof phase
-        required: true
-        type: choice
-        options:
-          - prepare
-          - edge-smoke
+        options: [prepare, edge-smoke, activate-cell, deactivate-cell, production-smoke]
       revision:
         description: Deployed configuration revision
+        required: true
+        type: string
+      release_manifest_digest:
+        description: Digest of the verified release manifest
+        required: true
+        type: string
+      signature_bundle_digest:
+        description: Digest of the release signature bundle
         required: true
         type: string
 
@@ -28,7 +36,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: development-cell-${{ inputs.cell }}
+  group: cell-${{ inputs.environment }}-${{ inputs.cell }}
   cancel-in-progress: false
 
 jobs:
@@ -38,36 +46,50 @@ jobs:
       actions: read
       contents: read
 
-  prove:
+  operate:
     if: github.ref == 'refs/heads/main'
     needs: ci
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     environment:
-      name: development
+      name: ${{ inputs.environment }}
     env:
       AWS_REGION: eu-west-2
       AWS_DEFAULT_REGION: eu-west-2
-      AWS_ROLE_ARN: arn:aws:iam::453722413624:role/accountable-development-apply
+      ENVIRONMENT: ${{ inputs.environment }}
       CELL: ${{ inputs.cell }}
-      PHASE: ${{ inputs.phase }}
+      OPERATION: ${{ inputs.operation }}
       REVISION: ${{ inputs.revision }}
+      RELEASE_BUCKET: accountable-releases-453722413624-eu-west-2
+      RELEASE_KMS_KEY_ID: ${{ vars.ACCOUNTABLE_RELEASE_KMS_KEY_ARN }}
+      MANIFEST_DIGEST: ${{ inputs.release_manifest_digest }}
+      BUNDLE_DIGEST: ${{ inputs.signature_bundle_digest }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install pinned mise
+      - name: Install pinned tools
         uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
         with:
           version: 2026.7.13
 
-      - name: Install web dependencies
-        if: inputs.phase == 'edge-smoke'
+      - name: Resolve the exact environment contract
         run: |
-          mise exec -- pnpm install --frozen-lockfile --ignore-scripts
-          mise exec -- pnpm exec playwright install --with-deps chromium firefox webkit
+          set -euo pipefail
+          case "$ENVIRONMENT:$CELL" in
+            development:development-01|development:proof-01) account=453722413624 ;;
+            staging:staging-01) account=723225039926 ;;
+            production:production-01) account=576329195663 ;;
+            *) echo "the cell does not belong to the selected environment" >&2; exit 2 ;;
+          esac
+          if [[ "$OPERATION" == "production-smoke" && "$ENVIRONMENT" != "production" ]]; then
+            echo "production-smoke is restricted to production" >&2
+            exit 2
+          fi
+          echo "AWS_ROLE_ARN=arn:aws:iam::$account:role/accountable-$ENVIRONMENT-apply" >>"$GITHUB_ENV"
+          echo "ROOT=infra/opentofu/environments/$ENVIRONMENT/cells/$CELL" >>"$GITHUB_ENV"
 
-      - name: Request AWS apply identity
+      - name: Request protected apply identity
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
@@ -78,55 +100,98 @@ jobs:
             fs.writeFileSync(tokenPath, token, { mode: 0o600 });
             core.exportVariable("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath);
 
-      - name: Initialise cell state
+      - name: Initialise and read cell state
         run: |
+          set -euo pipefail
           mise trust mise.toml
-          mise exec -- tofu -chdir="infra/opentofu/environments/development/cells/$CELL" init -input=false
+          mise exec -- tofu -chdir="$ROOT" init -input=false
+          mise exec -- tofu -chdir="$ROOT" output -json >"$RUNNER_TEMP/cell-output.json"
 
       - name: Prove live private posture
-        run: |
-          set -euo pipefail
-          root="infra/opentofu/environments/development/cells/$CELL"
-          mise exec -- tofu -chdir="$root" output -json | bash scripts/aws/prove-cell-posture.sh
+        if: inputs.operation == 'prepare' || inputs.operation == 'edge-smoke' || inputs.operation == 'production-smoke'
+        run: bash scripts/aws/prove-cell-posture.sh <"$RUNNER_TEMP/cell-output.json"
 
-      - name: Run bootstrap, migrate, and preflight
-        if: inputs.phase == 'prepare'
+      - name: Run bootstrap, migration, and preflight
+        if: inputs.operation == 'prepare'
         run: |
           set -euo pipefail
-          root="infra/opentofu/environments/development/cells/$CELL"
-          output="$(mise exec -- tofu -chdir="$root" output -json)"
-          cluster="$(jq -r '.ecs_cluster_arn.value' <<<"$output")"
-          subnets="$(jq -r '.application_subnet_ids.value | join(",")' <<<"$output")"
-          bash scripts/aws/run-ecs-task.sh "$cluster" "$(jq -r '.bootstrap_task_definition_arn.value' <<<"$output")" "$subnets" "$(jq -r '.bootstrap_security_group_id.value' <<<"$output")"
-          bash scripts/aws/run-ecs-task.sh "$cluster" "$(jq -r '.migrate_task_definition_arn.value' <<<"$output")" "$subnets" "$(jq -r '.migrate_security_group_id.value' <<<"$output")"
-          bash scripts/aws/run-ecs-task.sh "$cluster" "$(jq -r '.preflight_task_definition_arn.value' <<<"$output")" "$subnets" "$(jq -r '.api_security_group_id.value' <<<"$output")"
+          output="$RUNNER_TEMP/cell-output.json"
+          cluster="$(jq -er '.ecs_cluster_arn.value' "$output")"
+          subnets="$(jq -er '.application_subnet_ids.value | join(",")' "$output")"
+          bash scripts/aws/run-ecs-task.sh "$cluster" "$(jq -er '.bootstrap_task_definition_arn.value' "$output")" "$subnets" "$(jq -er '.bootstrap_security_group_id.value' "$output")"
+          bash scripts/aws/run-ecs-task.sh "$cluster" "$(jq -er '.migrate_task_definition_arn.value' "$output")" "$subnets" "$(jq -er '.migrate_security_group_id.value' "$output")"
+          bash scripts/aws/run-ecs-task.sh "$cluster" "$(jq -er '.preflight_task_definition_arn.value' "$output")" "$subnets" "$(jq -er '.api_security_group_id.value' "$output")"
 
-      - name: Publish web release and prove the edge
-        if: inputs.phase == 'edge-smoke'
+      - name: Install browser proof dependencies
+        if: inputs.operation == 'edge-smoke' || inputs.operation == 'production-smoke'
+        run: |
+          mise exec -- pnpm install --frozen-lockfile --ignore-scripts
+          mise exec -- pnpm exec playwright install --with-deps chromium firefox webkit
+
+      - name: Publish the signed web release and prove the edge
+        if: inputs.operation == 'edge-smoke' || inputs.operation == 'production-smoke'
+        env:
+          WORKFLOW_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/heads/main
         run: |
           set -euo pipefail
-          root="infra/opentofu/environments/development/cells/$CELL"
-          output="$(mise exec -- tofu -chdir="$root" output -json)"
-          bucket="$(jq -r '.web_bucket_name.value' <<<"$output")"
-          distribution="$(jq -r '.cloudfront_distribution_id.value' <<<"$output")"
-          domain="$(jq -r '.cloudfront_domain.value' <<<"$output")"
-          cell_url="https://$domain"
-          mise exec -- pnpm --filter @accountable/web build
-          runtime_source="$RUNNER_TEMP/web-runtime.toml"
-          runtime_artifact="$(pwd)/apps/web/dist/_runtime/config.json"
-          mkdir -p "$(dirname "$runtime_artifact")"
-          printf 'environment = "development"\napi_base_url = "%s/api"\narchitecture_probe = true\n' "$cell_url" > "$runtime_source"
-          mise exec -- go run ./cmd/webconfig --config "$runtime_source" --revision "$REVISION" --output "$runtime_artifact"
-          aws s3 sync apps/web/dist "s3://$bucket" --delete --only-show-errors
+          output="$RUNNER_TEMP/cell-output.json"
+          domain="$(jq -er '.cloudfront_domain.value' "$output")"
+          distribution="$(jq -er '.cloudfront_distribution_id.value' "$output")"
+          web_bucket="$(jq -er '.web_bucket_name.value' "$output")"
+          runtime_config="$(jq -er '.web_runtime_config_base64.value' "$output")"
+          RELEASE_BUCKET="$RELEASE_BUCKET" WEB_BUCKET="$web_bucket" RUNTIME_CONFIG_BASE64="$runtime_config" \
+            mise exec -- bash scripts/release/publish-web.sh
           invalidation="$(aws cloudfront create-invalidation --distribution-id "$distribution" --paths '/*' --query 'Invalidation.Id' --output text)"
           aws cloudfront wait invalidation-completed --distribution-id "$distribution" --id "$invalidation"
-          ACCOUNTABLE_CELL_URL="$cell_url" ACCOUNTABLE_EXPECTED_RELEASE_ID="$REVISION" mise exec -- task test:cell-edge
+          aws s3api get-object --bucket "$RELEASE_BUCKET" --key "releases/v1/manifests/$MANIFEST_DIGEST.json" "$RUNNER_TEMP/release.json" >/dev/null
+          release_id="$(jq -er .release_id "$RUNNER_TEMP/release.json")"
+          if [[ "$OPERATION" == "production-smoke" ]]; then
+            ACCOUNTABLE_CELL_URL="https://$domain" ACCOUNTABLE_EXPECTED_RELEASE_ID="$release_id" mise exec -- task test:production-smoke
+          else
+            ACCOUNTABLE_CELL_URL="https://$domain" ACCOUNTABLE_EXPECTED_RELEASE_ID="$release_id" mise exec -- task test:cell-edge
+          fi
+
+      - name: Prove readiness before inventory activation
+        if: inputs.operation == 'activate-cell'
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/cell-output.json"
+          cluster="$(jq -er '.ecs_cluster_arn.value' "$output")"
+          api="$(jq -er '.ecs_service_name.value' "$output")"
+          collector="$(jq -er '.collector_service_name.value' "$output")"
+          aws ecs wait services-stable --cluster "$cluster" --services "$api" "$collector"
+          end="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          start="$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
+          heartbeat="$(aws cloudwatch get-metric-statistics --namespace Accountable/SLO --metric-name SLIExportHeartbeatCount \
+            --dimensions Name=Environment,Value="$ENVIRONMENT" Name=ServiceName,Value=accountable-api Name=CellId,Value="$CELL" \
+            --start-time "$start" --end-time "$end" --period 300 --statistics Sum --query 'Datapoints[?Sum>`0`]' --output json)"
+          jq -e 'length > 0' <<<"$heartbeat" >/dev/null
+
+      - name: Record the five-minute inventory boundary
+        if: inputs.operation == 'activate-cell' || inputs.operation == 'deactivate-cell'
+        run: |
+          set -euo pipefail
+          state=active
+          if [[ "$OPERATION" == "deactivate-cell" ]]; then state=inactive; fi
+          chain="$(mise exec -- go run ./cmd/cell-inventory write \
+            --bucket "$RELEASE_BUCKET" --kms-key-arn "$RELEASE_KMS_KEY_ID" --region "$AWS_REGION" \
+            --environment "$ENVIRONMENT" --cell-id "$CELL" --state "$state")"
+          effective="$(jq -er '.[-1].effective_at' <<<"$chain")"
+          wait_seconds=$(($(date -u -d "$effective" +%s) - $(date -u +%s)))
+          if (( wait_seconds < 0 || wait_seconds > 300 )); then
+            echo "the inventory boundary is invalid" >&2
+            exit 1
+          fi
+          sleep "$wait_seconds"
+          mise exec -- go run ./cmd/cell-inventory read \
+            --bucket "$RELEASE_BUCKET" --region "$AWS_REGION" --environment "$ENVIRONMENT" --cell-id "$CELL" \
+            | jq -e --arg state "$state" --arg effective "$effective" '.[-1].state == $state and .[-1].effective_at == $effective' >/dev/null
 
       - name: Upload browser traces on failure
-        if: failure() && inputs.phase == 'edge-smoke'
+        if: failure() && (inputs.operation == 'edge-smoke' || inputs.operation == 'production-smoke')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: development-${{ inputs.cell }}-edge-traces
+          name: ${{ inputs.environment }}-${{ inputs.cell }}-edge-traces
           path: test-results
           if-no-files-found: ignore
           retention-days: 7

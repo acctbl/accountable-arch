@@ -106,6 +106,25 @@ func TestParameterSecretSourceReturnsNoPartialBatch(t *testing.T) {
 	}
 }
 
+func TestParameterSecretSourceTreatsOnlyAMissingOptionalParameterAsAbsent(t *testing.T) {
+	t.Parallel()
+
+	api := newFakeParameterAPI(map[string]string{"/cell/api/standby": "standby-secret"})
+	source := newParameterSecretSource(api, "/cell/api")
+	value, present, err := source.ResolveOptional(context.Background(), "standby")
+	if err != nil || !present || string(value.Bytes()) != "standby-secret" {
+		t.Fatalf("present optional parameter = %q, %t, %v", value.Bytes(), present, err)
+	}
+	_, present, err = source.ResolveOptional(context.Background(), "missing")
+	if err != nil || present {
+		t.Fatalf("missing optional parameter = %t, %v", present, err)
+	}
+	api.err = errors.New("service unavailable")
+	if _, _, err := source.ResolveOptional(context.Background(), "standby"); !errors.Is(err, ErrSecretSourceUnavailable) {
+		t.Fatalf("failed optional lookup = %v", err)
+	}
+}
+
 func TestParameterSecretSourceRejectsPlaintextParameters(t *testing.T) {
 	t.Parallel()
 

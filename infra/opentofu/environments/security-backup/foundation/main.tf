@@ -49,7 +49,11 @@ data "aws_iam_policy_document" "image_recovery" {
       identifiers = ["arn:aws:iam::453722413624:root"]
     }
 
-    resources = ["arn:aws:ecr:eu-west-2:063280428550:repository/accountable"]
+    resources = [
+      "arn:aws:ecr:eu-west-2:063280428550:repository/accountable",
+      "arn:aws:ecr:eu-west-2:063280428550:repository/accountable-collector",
+      "arn:aws:ecr:eu-west-2:063280428550:repository/accountable-k6",
+    ]
   }
 }
 

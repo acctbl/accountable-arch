@@ -121,7 +121,7 @@ func VerifyWebFileManifest(root string, expected []byte, expectedDigest string) 
 }
 
 func BuildWebRuntimeRelease(releaseID, releaseManifestDigest, webAssetDigest string) ([]byte, error) {
-	if !releaseIDPattern.MatchString(releaseID) || !digestPattern.MatchString(releaseManifestDigest) || !digestPattern.MatchString(webAssetDigest) {
+	if !uuidV7Pattern.MatchString(releaseID) || !digestPattern.MatchString(releaseManifestDigest) || !digestPattern.MatchString(webAssetDigest) {
 		return nil, contractError("web runtime release")
 	}
 	return json.Marshal(WebRuntimeRelease{

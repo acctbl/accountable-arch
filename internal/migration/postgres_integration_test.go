@@ -51,7 +51,7 @@ func TestPostgresIntegrationRefusalMatrix(t *testing.T) {
 	defer func() { _ = database.Close() }()
 	reset := func() {
 		t.Helper()
-		if _, err := database.ExecContext(ctx, `DROP TABLE IF EXISTS goose_db_version, accountable_schema_state`); err != nil {
+		if _, err := database.ExecContext(ctx, `DROP TABLE IF EXISTS accountable_proof_nonces, goose_db_version, accountable_schema_state`); err != nil {
 			t.Fatalf("reset database: %v", err)
 		}
 	}
@@ -59,7 +59,7 @@ func TestPostgresIntegrationRefusalMatrix(t *testing.T) {
 	defer reset()
 
 	databaseConfig, password := databaseConfigFromDSN(t, dsn)
-	opened, err := platformdb.OpenDatabase(ctx, databaseConfig, staticResolver{password: password})
+	opened, err := platformdb.OpenDatabase(ctx, databaseConfig, staticResolver{password: password}, nil)
 	if !errors.Is(err, platformdb.ErrSchemaBehind) || opened != nil {
 		t.Fatalf("empty database open = (%v, %v), want schema behind", opened, err)
 	}
@@ -84,7 +84,7 @@ func TestPostgresIntegrationRefusalMatrix(t *testing.T) {
 	if migrationTimezone != "UTC" {
 		t.Fatalf("migration timezone = %q, want UTC", migrationTimezone)
 	}
-	opened, err = platformdb.OpenDatabase(ctx, databaseConfig, staticResolver{password: password})
+	opened, err = platformdb.OpenDatabase(ctx, databaseConfig, staticResolver{password: password}, nil)
 	if err != nil {
 		t.Fatalf("open compatible database: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestPostgresIntegrationRefusalMatrix(t *testing.T) {
 		Time: bootstrap.TimeConfig{
 			Provider: bootstrap.TimeProviderSystem, MaxClockError: time.Second, MaxDatabaseSkew: 5 * time.Second,
 		},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("build complete local foundation: %v", err)
 	}
@@ -162,7 +162,7 @@ DROP TABLE migration_state_update_audit`); err != nil {
 	if _, err := database.ExecContext(ctx, `DELETE FROM public.accountable_schema_state`); err != nil {
 		t.Fatalf("delete schema state: %v", err)
 	}
-	opened, err = platformdb.OpenDatabase(ctx, databaseConfig, staticResolver{password: password})
+	opened, err = platformdb.OpenDatabase(ctx, databaseConfig, staticResolver{password: password}, nil)
 	if opened != nil {
 		opened.Close()
 	}
@@ -178,7 +178,7 @@ DROP TABLE migration_state_update_audit`); err != nil {
 		if _, err := database.ExecContext(ctx, `UPDATE accountable_schema_state SET version = $1, dirty = $2`, version, dirty); err != nil {
 			t.Fatalf("%s seed state: %v", name, err)
 		}
-		opened, err := platformdb.OpenDatabase(ctx, databaseConfig, staticResolver{password: password})
+		opened, err := platformdb.OpenDatabase(ctx, databaseConfig, staticResolver{password: password}, nil)
 		if opened != nil {
 			opened.Close()
 		}
@@ -195,7 +195,7 @@ DROP TABLE migration_state_update_audit`); err != nil {
 		t.Fatalf("seed schema before failed migration: %v", err)
 	}
 	badMigrations := fstest.MapFS{
-		"20260801000001_bad_invalid.sql": &fstest.MapFile{Data: []byte("-- +goose Up\nTHIS IS NOT SQL;\n")},
+		"20260812000000_bad_invalid.sql": &fstest.MapFile{Data: []byte("-- +goose Up\nTHIS IS NOT SQL;\n")},
 	}
 	if err := migration.Run(ctx, database, migration.Source{Owner: "bad", FS: fs.FS(badMigrations)}); err == nil {
 		t.Fatal("invalid migration succeeded")
@@ -229,11 +229,11 @@ func TestPostgresIntegrationConcurrentMigrators(t *testing.T) {
 		t.Fatalf("open second Postgres connection: %v", err)
 	}
 	defer func() { _ = second.Close() }()
-	if _, err := first.ExecContext(ctx, `DROP TABLE IF EXISTS goose_db_version, accountable_schema_state`); err != nil {
+	if _, err := first.ExecContext(ctx, `DROP TABLE IF EXISTS accountable_proof_nonces, goose_db_version, accountable_schema_state`); err != nil {
 		t.Fatalf("reset database: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = first.ExecContext(context.Background(), `DROP TABLE IF EXISTS goose_db_version, accountable_schema_state`)
+		_, _ = first.ExecContext(context.Background(), `DROP TABLE IF EXISTS accountable_proof_nonces, goose_db_version, accountable_schema_state`)
 	})
 
 	slowMigration := fstest.MapFS{
@@ -280,8 +280,9 @@ SELECT pg_sleep(0.3);
 	if err := second.QueryRowContext(ctx, `SELECT version, dirty FROM accountable_schema_state WHERE singleton = TRUE`).Scan(&version, &dirty); err != nil {
 		t.Fatalf("read final schema state: %v", err)
 	}
-	if version != platformdb.MaximumSchemaVersion || dirty {
-		t.Fatalf("final schema state = (%d, %t), want (%d, false)", version, dirty, platformdb.MaximumSchemaVersion)
+	const slowMigrationVersion int64 = 20_260_801_000_000
+	if version != slowMigrationVersion || dirty {
+		t.Fatalf("final schema state = (%d, %t), want (%d, false)", version, dirty, slowMigrationVersion)
 	}
 }
 

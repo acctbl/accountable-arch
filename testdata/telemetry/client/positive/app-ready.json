@@ -3,7 +3,7 @@
   "client_application": "web",
   "event_name": "app.ready",
   "occurred_at": "2026-08-10T10:00:00.000Z",
-  "correlation_id": "018f47d2-7f00-7abc-8def-1234567890ab",
+  "correlation_id": "019261bb-4c10-7f3a-9aaa-0f1e2d3c4b5a",
   "route_class": "home",
   "release_id": "018f47d2-7f00-7abc-9def-1234567890ab",
   "client_artifact_type": "web_assets",

@@ -11,8 +11,7 @@ const connectCode = {
 
 const uuidV7 =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const expectedReleaseId =
-	process.env.ACCOUNTABLE_EXPECTED_RELEASE_ID ?? "playwright";
+const expectedReleaseId = process.env.ACCOUNTABLE_EXPECTED_RELEASE_ID;
 
 async function openProbeShell(page: Page) {
 	await page.goto("/");
@@ -34,7 +33,11 @@ test("generated system client succeeds across the browser CORS boundary", async 
 	const runtime = await page.evaluate(() =>
 		window.__accountableArchitectureProbe?.getRuntime(),
 	);
-	expect(runtime?.releaseId).toBe(expectedReleaseId);
+	if (expectedReleaseId) {
+		expect(runtime?.releaseId).toBe(expectedReleaseId);
+	} else {
+		expect(runtime?.releaseId).toMatch(uuidV7);
+	}
 	expect(runtime?.requestId).toMatch(uuidV7);
 	expect(consoleErrors).toEqual([]);
 });

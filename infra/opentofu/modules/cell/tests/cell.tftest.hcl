@@ -62,6 +62,12 @@ mock_provider "aws" {
     }
   }
 
+  mock_resource "aws_service_discovery_service" {
+    defaults = {
+      arn = "arn:aws:servicediscovery:eu-west-2:453722413624:service/srv-0000000000000000"
+    }
+  }
+
   mock_resource "aws_lb" {
     defaults = {
       arn      = "arn:aws:elasticloadbalancing:eu-west-2:453722413624:loadbalancer/app/accountable/0000000000000000"
@@ -81,16 +87,27 @@ mock_provider "aws" {
 }
 
 variables {
-  account_id             = "453722413624"
-  api_desired_count      = 1
-  availability_zones     = ["eu-west-2a", "eu-west-2b"]
-  cell_id                = "development-01"
-  configuration_revision = "proof"
-  cell_lifecycle         = "ephemeral"
-  environment            = "development"
-  image_repository_arn   = "arn:aws:ecr:eu-west-2:453722413624:repository/accountable"
-  image_uri              = "453722413624.dkr.ecr.eu-west-2.amazonaws.com/accountable@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-  vpc_cidr               = "10.20.0.0/16"
+  account_id                     = "453722413624"
+  alarm_input_topic_arn          = "arn:aws:sns:eu-west-2:453722413624:accountable-development-observability-alarm-input"
+  runbook_base_url               = "https://github.com/acctbl/accountable/tree/main/docs/runbooks/observability"
+  dashboard_base_url             = "https://acctbl.grafana.net"
+  api_desired_count              = 1
+  availability_zones             = ["eu-west-2a", "eu-west-2b"]
+  cell_id                        = "development-01"
+  configuration_revision         = "proof"
+  cell_lifecycle                 = "ephemeral"
+  collector_desired_count        = 1
+  collector_image_repository_arn = "arn:aws:ecr:eu-west-2:453722413624:repository/accountable-collector"
+  collector_image_uri            = "453722413624.dkr.ecr.eu-west-2.amazonaws.com/accountable-collector@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  grafana_instance_id            = "1765140"
+  grafana_otlp_endpoint          = "https://otlp-gateway-prod-gb-south-1.grafana.net/otlp"
+  environment                    = "development"
+  image_repository_arn           = "arn:aws:ecr:eu-west-2:453722413624:repository/accountable"
+  image_uri                      = "453722413624.dkr.ecr.eu-west-2.amazonaws.com/accountable@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  release_id                     = "018f47d2-7f00-7abc-8def-1234567890ab"
+  release_manifest_digest        = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  web_asset_digest               = "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  vpc_cidr                       = "10.20.0.0/16"
 }
 
 run "private_runtime_is_fail_closed" {
@@ -255,7 +272,57 @@ run "tasks_use_the_image_digest" {
   }
 }
 
-run "tasks_use_tmpfs_runtime_scratch" {
+run "staging_runs_one_continuous_signed_synthetic_workload" {
+  command = plan
+
+  providers = {
+    aws        = aws.regional
+    aws.global = aws.global
+  }
+
+  variables {
+    environment                        = "staging"
+    cell_id                            = "staging-01"
+    cell_lifecycle                     = "durable"
+    api_desired_count                  = 2
+    collector_desired_count            = 2
+    synthetic_observation_enabled      = true
+    synthetic_image_repository_arn     = "arn:aws:ecr:eu-west-2:453722413624:repository/accountable-k6"
+    synthetic_image_uri                = "453722413624.dkr.ecr.eu-west-2.amazonaws.com/accountable-k6@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    database_final_snapshot_identifier = "accountable-staging-01-final"
+  }
+
+  assert {
+    condition = (
+      length(aws_ecs_service.synthetic) == 1 &&
+      one(aws_ecs_service.synthetic).desired_count == 1 &&
+      !one(aws_ecs_service.synthetic).network_configuration[0].assign_public_ip
+    )
+    error_message = "Staging must run exactly one private continuous synthetic workload."
+  }
+
+  assert {
+    condition = (
+      length(aws_ecs_task_definition.synthetic) == 1 &&
+      strcontains(one(aws_ecs_task_definition.synthetic).container_definitions, "@sha256:") &&
+      strcontains(one(aws_ecs_task_definition.synthetic).container_definitions, "\"ACCOUNTABLE_PROFILE\",\"value\":\"soak\"") &&
+      strcontains(one(aws_ecs_task_definition.synthetic).container_definitions, "\"ACCOUNTABLE_DURATION\",\"value\":\"168h\"") &&
+      strcontains(one(aws_ecs_task_definition.synthetic).container_definitions, "\"ACCOUNTABLE_RATE\",\"value\":\"1\"") &&
+      strcontains(one(aws_ecs_task_definition.synthetic).container_definitions, "proof-key-active")
+    )
+    error_message = "The synthetic task must use the signed digest and the bounded long-running workload contract."
+  }
+
+  assert {
+    condition = (
+      length(aws_cloudwatch_metric_alarm.synthetic_task_count) == 1 &&
+      one(aws_cloudwatch_metric_alarm.synthetic_task_count).treat_missing_data == "breaching"
+    )
+    error_message = "Missing staging synthetic traffic must alert independently."
+  }
+}
+
+run "tasks_use_the_task_scoped_scratch_volume" {
   command = plan
 
   providers = {
@@ -270,27 +337,56 @@ run "tasks_use_tmpfs_runtime_scratch" {
         aws_ecs_task_definition.migrate.container_definitions,
         aws_ecs_task_definition.preflight.container_definitions,
         aws_ecs_task_definition.bootstrap.container_definitions,
+        aws_ecs_task_definition.collector.container_definitions,
       ] :
-      strcontains(definitions, "\"tmpfs\"") &&
-      strcontains(definitions, "/run/accountable") &&
-      strcontains(definitions, "uid=65532") &&
-      strcontains(definitions, "gid=65532") &&
-      strcontains(definitions, "mode=0700") &&
+      !strcontains(definitions, "tmpfs") &&
+      !strcontains(definitions, "linuxParameters") &&
+      strcontains(definitions, "\"containerPath\":\"/run/accountable\"") &&
+      strcontains(definitions, "\"sourceVolume\":\"runtime-scratch\"") &&
       strcontains(definitions, "\"readonlyRootFilesystem\":true") &&
-      !strcontains(definitions, "mountPoints") &&
-      !strcontains(definitions, "sourceVolume")
+      strcontains(definitions, "\"stopTimeout\":30")
     ])
-    error_message = "Runtime tasks must use a tmpfs at /run/accountable owned by the image user instead of root-owned bind mounts."
+    error_message = "Fargate tasks must mount the task-scoped bind volume at /run/accountable and must not use tmpfs."
   }
 
   assert {
     condition = alltrue([
-      length(aws_ecs_task_definition.api.volume) == 0,
-      length(aws_ecs_task_definition.migrate.volume) == 0,
-      length(aws_ecs_task_definition.preflight.volume) == 0,
-      length(aws_ecs_task_definition.bootstrap.volume) == 0,
+      for volumes in [
+        aws_ecs_task_definition.api.volume,
+        aws_ecs_task_definition.migrate.volume,
+        aws_ecs_task_definition.preflight.volume,
+        aws_ecs_task_definition.bootstrap.volume,
+        aws_ecs_task_definition.collector.volume,
+      ] :
+      length(volumes) == 1 &&
+      one(volumes).name == "runtime-scratch" &&
+      one(volumes).host_path == null &&
+      length(one(volumes).efs_volume_configuration) == 0
     ])
-    error_message = "Runtime tasks must not declare empty bind-mount volumes."
+    error_message = "Each task must declare exactly one task-scoped bind volume with no host path and no external file system."
+  }
+
+  assert {
+    condition = (
+      aws_ecs_cluster.cell.configuration[0].managed_storage_configuration[0].fargate_ephemeral_storage_kms_key_id ==
+      aws_kms_key.cell.arn
+    )
+    error_message = "Fargate ephemeral storage must be encrypted with the cell customer-managed key."
+  }
+
+  assert {
+    condition = (
+      strcontains(aws_ecs_task_definition.collector.container_definitions, "\"name\":\"collector-init\"") &&
+      length([
+        for mount in jsondecode(aws_ecs_task_definition.collector.container_definitions)[0].mountPoints :
+        mount if mount.readOnly == false
+      ]) == 1 &&
+      length([
+        for mount in jsondecode(aws_ecs_task_definition.collector.container_definitions)[1].mountPoints :
+        mount if mount.readOnly == true
+      ]) == 1
+    )
+    error_message = "Only collector-init may write the scratch volume, and the Collector must mount it read-only."
   }
 }
 

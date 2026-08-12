@@ -1,5 +1,14 @@
+schema_version = 1
+revision = "${revision}"
 aws_region = "${aws_region}"
+cell_id = "${cell_id}"
 database_host = "${database_host}"
 environment = "${environment}"
 kms_key_arn = "${kms_key_arn}"
 parameter_root = "${parameter_root}"
+
+[telemetry]
+collector_endpoint = "${collector_endpoint}"
+protocol = "otlp_http"
+sampling_policy = "parent_based_5pct_v1"
+redaction_policy_version = "allowlist_v1"

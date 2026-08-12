@@ -1,0 +1,311 @@
+name: Managed observability proof
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      cell:
+        required: true
+        type: string
+      profile:
+        required: true
+        type: string
+      duration:
+        required: true
+        type: string
+      rate:
+        required: true
+        type: number
+    secrets:
+      ACCOUNTABLE_PROOF_KEY:
+        required: true
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment environment
+        required: true
+        type: choice
+        options: [development, staging, production]
+      cell:
+        description: Cell identifier
+        required: true
+        type: string
+      profile:
+        description: Production workload profile
+        required: true
+        type: choice
+        options: [smoke, baseline, capacity, soak, controlled-failure]
+      duration:
+        description: k6 duration such as 10m
+        required: true
+        type: string
+      rate:
+        description: Requests started each second
+        required: true
+        type: number
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: observability-proof-${{ inputs.environment }}-${{ inputs.cell }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/require-green-ci.yml
+    permissions:
+      actions: read
+      contents: read
+
+  capacity:
+    if: github.ref == 'refs/heads/main'
+    needs: ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Request branch-trusted capacity identity
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const token = await core.getIDToken("sts.amazonaws.com");
+            const tokenPath = path.join(process.env.RUNNER_TEMP, "aws-proof-capacity-token");
+            fs.writeFileSync(tokenPath, token, { mode: 0o600 });
+            core.exportVariable("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath);
+            core.exportVariable("AWS_ROLE_ARN", "arn:aws:iam::453722413624:role/accountable-development-plan");
+
+      - name: Read one published capacity sample
+        run: bash scripts/observability/check-capacity.sh >"$RUNNER_TEMP/capacity.json"
+
+      - name: Preserve the exact capacity input
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: proof-capacity-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/capacity.json
+          retention-days: 1
+
+  proof:
+    if: github.ref == 'refs/heads/main'
+    needs: [ci, capacity]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    environment:
+      name: ${{ inputs.environment }}
+    env:
+      AWS_REGION: eu-west-2
+      AWS_DEFAULT_REGION: eu-west-2
+      ENVIRONMENT: ${{ inputs.environment }}
+      CELL: ${{ inputs.cell }}
+      PROFILE: ${{ inputs.profile }}
+      DURATION: ${{ inputs.duration }}
+      RATE: ${{ inputs.rate }}
+      RELEASE_BUCKET: accountable-releases-453722413624-eu-west-2
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.7.13
+
+      - name: Download the consumed capacity sample
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: proof-capacity-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/managed-proof
+
+      - name: Validate the protected proof contract
+        id: contract
+        env:
+          ACCOUNTABLE_PROOF_KEY: ${{ secrets.ACCOUNTABLE_PROOF_KEY }}
+        run: |
+          set -euo pipefail
+          case "$ENVIRONMENT:$CELL" in
+            development:development-01|development:proof-01) account=453722413624 ;;
+            staging:staging-01) account=723225039926 ;;
+            production:production-01) account=576329195663 ;;
+            *) echo "the cell does not belong to the selected environment" >&2; exit 2 ;;
+          esac
+          case "$PROFILE" in smoke|baseline|capacity|soak|controlled-failure) ;; *) exit 2 ;; esac
+          if [[ "$ENVIRONMENT" == "production" && "$PROFILE" != "smoke" ]]; then
+            echo "production permits only the safe smoke profile" >&2
+            exit 2
+          fi
+          if [[ ! "$DURATION" =~ ^[1-9][0-9]*(s|m|h)$ || ! "$RATE" =~ ^[1-9][0-9]*$ ]]; then
+            echo "the duration and rate must be bounded positive values" >&2
+            exit 2
+          fi
+          : "${ACCOUNTABLE_PROOF_KEY:?the protected proof key is required}"
+          echo "AWS_ROLE_ARN=arn:aws:iam::$account:role/accountable-$ENVIRONMENT-apply" >>"$GITHUB_ENV"
+          echo "ROOT=infra/opentofu/environments/$ENVIRONMENT/cells/$CELL" >>"$GITHUB_ENV"
+          echo "PROOF_STARTED_MILLISECONDS=$(date -u +%s000)" >>"$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/managed-proof"
+          printf '0' >"$RUNNER_TEMP/managed-proof/proof"
+          printf '0' >"$RUNNER_TEMP/managed-proof/privacy"
+          printf '0' >"$RUNNER_TEMP/managed-proof/paging"
+
+      - name: Request protected apply identity
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const token = await core.getIDToken("sts.amazonaws.com");
+            const tokenPath = path.join(process.env.RUNNER_TEMP, "aws-observability-proof-token");
+            fs.writeFileSync(tokenPath, token, { mode: 0o600 });
+            core.exportVariable("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath);
+
+      - name: Read the deployed cell identity
+        id: identity
+        run: |
+          set -euo pipefail
+          mise trust mise.toml
+          mise exec -- tofu -chdir="$ROOT" init -input=false
+          mise exec -- tofu -chdir="$ROOT" output -json >"$RUNNER_TEMP/cell-output.json"
+          domain="$(jq -er '.cloudfront_domain.value' "$RUNNER_TEMP/cell-output.json")"
+          release_id="$(jq -er '.web_identity.value.release_id' "$RUNNER_TEMP/cell-output.json")"
+          echo "ACCOUNTABLE_URL=https://$domain" >>"$GITHUB_ENV"
+          echo "RELEASE_ID=$release_id" >>"$GITHUB_ENV"
+
+      - name: Prove exporter terminal behavior
+        id: exporter
+        run: |
+          GOCACHE="$RUNNER_TEMP/go-cache" mise exec -- go test ./internal/platform/telemetry/delivery ./internal/platform/telemetry/emf -count=1
+
+      - name: Run the managed workload
+        id: load
+        continue-on-error: true
+        env:
+          ACCOUNTABLE_PROOF_KEY: ${{ secrets.ACCOUNTABLE_PROOF_KEY }}
+          ACCOUNTABLE_PROFILE: ${{ inputs.profile }}
+          ACCOUNTABLE_DURATION: ${{ inputs.duration }}
+          ACCOUNTABLE_RATE: ${{ inputs.rate }}
+        run: mise exec -- k6 run tests/load/observability.js
+
+      - name: Prove clean replacement and declared unexpected task stops
+        id: replacement
+        if: inputs.profile == 'controlled-failure' && inputs.environment != 'production'
+        env:
+          ACCOUNTABLE_CELL: ${{ inputs.cell }}
+          ACCOUNTABLE_CELL_OUTPUT: ${{ runner.temp }}/cell-output.json
+          ACCOUNTABLE_ENVIRONMENT: ${{ inputs.environment }}
+        run: bash scripts/observability/prove-task-uncertainty.sh
+
+      - name: Wait for managed telemetry ingestion
+        if: always() && steps.load.outcome == 'success'
+        run: sleep 90
+
+      - name: Prove current backends, alarms, and delivery
+        id: posture
+        if: always() && steps.load.outcome == 'success'
+        env:
+          ACCOUNTABLE_CELL: ${{ inputs.cell }}
+          ACCOUNTABLE_ENVIRONMENT: ${{ inputs.environment }}
+          ACCOUNTABLE_RELEASE_BUCKET: accountable-releases-453722413624-eu-west-2
+        run: |
+          set -euo pipefail
+          aws lambda invoke --function-name "accountable-$ENVIRONMENT-observability-canary" "$RUNNER_TEMP/canary-response.json" >"$RUNNER_TEMP/canary-invoke.json"
+          jq -e '(.FunctionError // "") == "" and .StatusCode == 200' "$RUNNER_TEMP/canary-invoke.json" >/dev/null
+          bash scripts/aws/prove-observability-posture.sh
+
+      - name: Prove critical email and entitlement-controlled IRM paging
+        id: paging
+        if: always() && steps.load.outcome == 'success' && steps.posture.outcome == 'success'
+        env:
+          ACCOUNTABLE_CAPACITY_EVIDENCE: ${{ runner.temp }}/managed-proof/capacity.json
+          ACCOUNTABLE_ENVIRONMENT: ${{ inputs.environment }}
+          ACCOUNTABLE_GRAFANA_STACK_URL: ${{ vars.ACCOUNTABLE_GRAFANA_STACK_URL }}
+          ACCOUNTABLE_IRM_API_URL: ${{ vars.ACCOUNTABLE_IRM_API_URL }}
+        run: |
+          set -euo pipefail
+          bash scripts/observability/prove-paging.sh
+          printf '1' >"$RUNNER_TEMP/managed-proof/paging"
+
+      - name: Prove infrastructure state
+        id: infrastructure
+        if: always() && steps.load.outcome == 'success'
+        env:
+          ACCOUNTABLE_ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          bash scripts/observability/check-infrastructure.sh <"$RUNNER_TEMP/cell-output.json" >"$RUNNER_TEMP/infrastructure.json"
+          jq -e '.state == "pass"' "$RUNNER_TEMP/infrastructure.json" >/dev/null
+
+      - name: Prove privacy exclusions
+        id: privacy
+        if: always() && steps.load.outcome == 'success'
+        run: |
+          set -euo pipefail
+          log_group="$(jq -er '.runtime_log_group_name.value' "$RUNNER_TEMP/cell-output.json")"
+          for secret in email@example.invalid bearer-secret session-token; do
+            events="$(aws logs filter-log-events \
+              --log-group-name "$log_group" \
+              --start-time "$PROOF_STARTED_MILLISECONDS" \
+              --filter-pattern "\"$secret\"" \
+              --query 'events' \
+              --output json)"
+            jq -e 'length == 0' <<<"$events" >/dev/null
+          done
+          printf '1' >"$RUNNER_TEMP/managed-proof/privacy"
+
+      - name: Record complete managed proof
+        if: always()
+        run: |
+          set -euo pipefail
+          proof=0
+          replacement_ok=0
+          if [[ "$PROFILE" != "controlled-failure" || "${{ steps.replacement.outcome }}" == "success" ]]; then
+            replacement_ok=1
+          fi
+          if [[ "${{ steps.load.outcome }}" == "success" && "${{ steps.exporter.outcome }}" == "success" && \
+                "${{ steps.posture.outcome }}" == "success" && "${{ steps.paging.outcome }}" == "success" && \
+                "${{ steps.infrastructure.outcome }}" == "success" && "$replacement_ok" == "1" ]]; then
+            proof=1
+          fi
+          printf '%s' "$proof" >"$RUNNER_TEMP/managed-proof/proof"
+          privacy="$(<"$RUNNER_TEMP/managed-proof/privacy")"
+          paging="$(<"$RUNNER_TEMP/managed-proof/paging")"
+          timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          dimensions="[{\"Name\":\"Environment\",\"Value\":\"$ENVIRONMENT\"},{\"Name\":\"CellId\",\"Value\":\"$CELL\"},{\"Name\":\"ReleaseId\",\"Value\":\"$RELEASE_ID\"}]"
+          metrics="$(jq -cn \
+            --arg timestamp "$timestamp" \
+            --argjson dimensions "$dimensions" \
+            --argjson proof "$proof" \
+            --argjson privacy "$privacy" \
+            --argjson paging "$paging" '
+              [
+                {MetricName:"ManagedProofSuccess",Value:$proof,Unit:"None",Timestamp:$timestamp,Dimensions:$dimensions},
+                {MetricName:"PrivacyProofSuccess",Value:$privacy,Unit:"None",Timestamp:$timestamp,Dimensions:$dimensions},
+                {MetricName:"PagingProofSuccess",Value:$paging,Unit:"None",Timestamp:$timestamp,Dimensions:$dimensions}
+              ]
+            ')"
+          aws cloudwatch put-metric-data --namespace Accountable/Observability --metric-data "$metrics"
+          jq -n \
+            --arg environment "$ENVIRONMENT" \
+            --arg cell "$CELL" \
+            --arg release_id "$RELEASE_ID" \
+            --arg observed_at "$timestamp" \
+            --argjson proof "$proof" \
+            --argjson privacy "$privacy" \
+            --argjson paging "$paging" \
+            '{schema_version:1,environment:$environment,cell_id:$cell,release_id:$release_id,observed_at:$observed_at,managed_proof_success:$proof,privacy_proof_success:$privacy,paging_proof_success:$paging}' \
+            >"$RUNNER_TEMP/managed-proof/result.json"
+          jq -e '.managed_proof_success == 1 and .privacy_proof_success == 1 and .paging_proof_success == 1' "$RUNNER_TEMP/managed-proof/result.json" >/dev/null
+
+      - name: Preserve the proof result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: managed-proof-${{ inputs.environment }}-${{ inputs.cell }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/managed-proof/result.json
+          if-no-files-found: error
+          retention-days: 30

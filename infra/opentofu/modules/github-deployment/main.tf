@@ -20,6 +20,7 @@ locals {
   delivery_ecs_actions = [
     "ecs:DescribeServices",
     "ecs:DescribeTasks",
+    "ecs:ListTasks",
     "ecs:RunTask",
     "ecs:StopTask",
   ]
@@ -49,6 +50,80 @@ locals {
     "ecr:TagResource",
     "ecr:UntagResource",
   ]
+  observability_actions = [
+    "cloudwatch:DeleteAlarms",
+    "cloudwatch:DescribeAlarms",
+    "cloudwatch:GetMetricData",
+    "cloudwatch:GetMetricStatistics",
+    "cloudwatch:ListMetrics",
+    "cloudwatch:ListTagsForResource",
+    "cloudwatch:PutMetricAlarm",
+    "cloudwatch:SetAlarmState",
+    "cloudwatch:TagResource",
+    "cloudwatch:UntagResource",
+    "events:DeleteRule",
+    "events:DescribeRule",
+    "events:ListTagsForResource",
+    "events:ListTargetsByRule",
+    "events:PutRule",
+    "events:PutTargets",
+    "events:RemoveTargets",
+    "events:TagResource",
+    "events:UntagResource",
+    "lambda:AddPermission",
+    "lambda:CreateFunction",
+    "lambda:DeleteFunction",
+    "lambda:GetFunction",
+    "lambda:GetFunctionCodeSigningConfig",
+    "lambda:GetFunctionConfiguration",
+    "lambda:GetPolicy",
+    "lambda:InvokeFunction",
+    "lambda:ListFunctions",
+    "lambda:ListTags",
+    "lambda:ListVersionsByFunction",
+    "lambda:RemovePermission",
+    "lambda:TagResource",
+    "lambda:UntagResource",
+    "lambda:UpdateFunctionCode",
+    "lambda:UpdateFunctionConfiguration",
+    "logs:CreateLogGroup",
+    "logs:DeleteLogGroup",
+    "logs:DeleteMetricFilter",
+    "logs:DeleteResourcePolicy",
+    "logs:DescribeLogGroups",
+    "logs:DescribeMetricFilters",
+    "logs:DescribeResourcePolicies",
+    "logs:FilterLogEvents",
+    "logs:GetQueryResults",
+    "logs:ListTagsForResource",
+    "logs:PutMetricFilter",
+    "logs:PutResourcePolicy",
+    "logs:PutRetentionPolicy",
+    "logs:StartQuery",
+    "logs:StopQuery",
+    "logs:TagResource",
+    "logs:UntagResource",
+    "sns:CreateTopic",
+    "sns:DeleteTopic",
+    "sns:GetSubscriptionAttributes",
+    "sns:GetTopicAttributes",
+    "sns:ListSubscriptionsByTopic",
+    "sns:ListTagsForResource",
+    "sns:SetSubscriptionAttributes",
+    "sns:SetTopicAttributes",
+    "sns:Subscribe",
+    "sns:TagResource",
+    "sns:Unsubscribe",
+    "sns:UntagResource",
+    "sqs:CreateQueue",
+    "sqs:DeleteQueue",
+    "sqs:GetQueueAttributes",
+    "sqs:GetQueueUrl",
+    "sqs:ListQueueTags",
+    "sqs:SetQueueAttributes",
+    "sqs:TagQueue",
+    "sqs:UntagQueue",
+  ]
   deployment_policy_actions = [
     "iam:CreatePolicy",
     "iam:CreatePolicyVersion",
@@ -68,10 +143,42 @@ locals {
     "arn:aws:iam::${var.account_id}:policy/accountable-${var.environment}-delivery",
     "arn:aws:iam::${var.account_id}:policy/accountable-${var.environment}-edge",
     "arn:aws:iam::${var.account_id}:policy/accountable-${var.environment}-foundation",
+    "arn:aws:iam::${var.account_id}:policy/accountable-${var.environment}-observability",
     "arn:aws:iam::aws:policy/ReadOnlyAccess",
     "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup",
   ]
-  pass_role_services = ["backup.amazonaws.com", "ecs-tasks.amazonaws.com"]
+  pass_role_services = ["backup.amazonaws.com", "ecs-tasks.amazonaws.com", "lambda.amazonaws.com"]
+
+  workflow_ref_prefix = "${var.github_repository}/.github/workflows"
+  plan_workflow_files = concat(
+    ["cell-plan.yml", "observability-plan.yml", "oidc-contract.yml"],
+    var.environment == "development" ? ["observability-proof.yml", "promotion.yml"] : [],
+  )
+  apply_workflow_files = concat(
+    ["cell-plan.yml", "cell-runtime.yml", "observability-plan.yml", "observability-proof.yml", "observability-tokens.yml"],
+    var.environment == "development" ? [
+      "collector-image.yml",
+      "image-build.yml",
+      "k6-image.yml",
+      "release-retention.yml",
+      "release.yml",
+    ] : [],
+    var.environment == "staging" ? ["observability-proof-schedule.yml"] : [],
+    var.environment == "production" ? ["observability-proof-schedule.yml"] : [],
+  )
+  plan_oidc_subjects = [
+    for workflow in local.plan_workflow_files :
+    "${var.github_oidc_subject_prefix}:ref:refs/heads/main:workflow_ref:${local.workflow_ref_prefix}/${workflow}@refs/heads/main"
+  ]
+  apply_oidc_subjects = [
+    for workflow in local.apply_workflow_files :
+    "${var.github_oidc_subject_prefix}:environment:${var.environment}:workflow_ref:${local.workflow_ref_prefix}/${workflow}@refs/heads/main"
+  ]
+  promotion_oidc_subjects = var.environment == "development" ? [
+    "${var.github_oidc_subject_prefix}:environment:staging:workflow_ref:${local.workflow_ref_prefix}/promotion.yml@refs/heads/main",
+    ] : var.environment == "staging" ? [
+    "${var.github_oidc_subject_prefix}:environment:production:workflow_ref:${local.workflow_ref_prefix}/promotion.yml@refs/heads/main",
+  ] : []
 }
 
 resource "aws_iam_openid_connect_provider" "github" {
@@ -97,7 +204,7 @@ data "aws_iam_policy_document" "plan_assume" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["${var.github_oidc_subject_prefix}:ref:refs/heads/main"]
+      values   = local.plan_oidc_subjects
     }
   }
 }
@@ -120,7 +227,7 @@ data "aws_iam_policy_document" "apply_assume" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["${var.github_oidc_subject_prefix}:environment:${var.environment}"]
+      values   = concat(local.apply_oidc_subjects, local.promotion_oidc_subjects)
     }
   }
 }
@@ -134,6 +241,49 @@ resource "aws_iam_role" "plan" {
 resource "aws_iam_role_policy_attachment" "plan_read_only" {
   role       = aws_iam_role.plan.name
   policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
+}
+
+data "aws_iam_policy_document" "plan_observability_token" {
+  statement {
+    actions   = ["ssm:GetParameter"]
+    resources = ["arn:aws:ssm:${var.region}:${var.account_id}:parameter/accountable/observability/${var.environment}/grafana-plan-token"]
+  }
+
+  statement {
+    actions   = ["kms:Decrypt"]
+    resources = ["arn:aws:kms:${var.region}:${var.account_id}:key/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["ssm.${var.region}.amazonaws.com"]
+    }
+
+    condition {
+      test     = "ForAnyValue:StringEquals"
+      variable = "kms:ResourceAliases"
+      values   = ["alias/accountable-${var.environment}-observability"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "plan_observability_token" {
+  name   = "accountable-observability-plan-token"
+  role   = aws_iam_role.plan.id
+  policy = data.aws_iam_policy_document.plan_observability_token.json
+}
+
+data "aws_iam_policy_document" "plan_release_key" {
+  statement {
+    actions   = ["kms:Decrypt", "kms:DescribeKey"]
+    resources = ["arn:aws:kms:${var.region}:453722413624:key/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "plan_release_key" {
+  name   = "accountable-release-evidence"
+  role   = aws_iam_role.plan.id
+  policy = data.aws_iam_policy_document.plan_release_key.json
 }
 
 resource "aws_iam_role" "apply" {
@@ -414,9 +564,12 @@ data "aws_iam_policy_document" "apply_cell" {
       test     = "StringEquals"
       variable = "kms:ViaService"
       values = [
+        "logs.${var.region}.amazonaws.com",
         "rds.${var.region}.amazonaws.com",
         "s3.${var.region}.amazonaws.com",
         "secretsmanager.${var.region}.amazonaws.com",
+        "sns.${var.region}.amazonaws.com",
+        "sqs.${var.region}.amazonaws.com",
       ]
     }
   }
@@ -596,9 +749,77 @@ data "aws_iam_policy_document" "apply_delivery" {
   }
 
   statement {
-    sid       = "PublishAndInspectRuntimeImages"
-    actions   = local.delivery_ecr_actions
-    resources = ["arn:aws:ecr:${var.region}:${var.account_id}:repository/accountable"]
+    sid = "ReadProtectedReleaseEvidence"
+    actions = [
+      "s3:GetObject",
+      "s3:ListBucket",
+    ]
+    resources = [
+      "arn:aws:s3:::accountable-releases-453722413624-${var.region}",
+      "arn:aws:s3:::accountable-releases-453722413624-${var.region}/*",
+    ]
+  }
+
+  statement {
+    sid     = "WriteProtectedOperationalEvidence"
+    actions = ["s3:PutObject"]
+    resources = [
+      "arn:aws:s3:::accountable-releases-453722413624-${var.region}/observability/v1/cell-inventory/*",
+      "arn:aws:s3:::accountable-releases-453722413624-${var.region}/observability/v1/promotion-evidence/*",
+    ]
+  }
+
+  statement {
+    sid = "UseProtectedReleaseEvidenceKey"
+    actions = [
+      "kms:Decrypt",
+      "kms:DescribeKey",
+      "kms:Encrypt",
+      "kms:GenerateDataKey",
+    ]
+    resources = ["arn:aws:kms:${var.region}:453722413624:key/*"]
+  }
+
+  statement {
+    sid     = "PublishAndInspectRuntimeImages"
+    actions = local.delivery_ecr_actions
+    resources = [
+      "arn:aws:ecr:${var.region}:${var.account_id}:repository/accountable",
+      "arn:aws:ecr:${var.region}:${var.account_id}:repository/accountable-collector",
+      "arn:aws:ecr:${var.region}:${var.account_id}:repository/accountable-k6",
+    ]
+  }
+
+  # Observability tokens are written by the protected token workflow only, at
+  # exact names, and never by an application runtime.
+  statement {
+    sid = "ReplaceObservabilityTokens"
+    actions = [
+      "ssm:PutParameter",
+      "ssm:GetParameter",
+      "ssm:GetParameters",
+      "ssm:DeleteParameter",
+    ]
+    resources = [
+      "arn:aws:ssm:${var.region}:${var.account_id}:parameter/accountable/observability/${var.environment}/*",
+      "arn:aws:ssm:${var.region}:${var.account_id}:parameter/accountable/*/${var.environment}/collector/grafana-otlp-token-*",
+    ]
+  }
+
+  statement {
+    sid = "UseObservabilityKeyForTokens"
+    actions = [
+      "kms:Decrypt",
+      "kms:Encrypt",
+      "kms:DescribeKey",
+    ]
+    resources = ["arn:aws:kms:${var.region}:${var.account_id}:key/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["ssm.${var.region}.amazonaws.com"]
+    }
   }
 
   statement {
@@ -657,6 +878,70 @@ resource "aws_iam_role_policy_attachment" "apply_delivery" {
   policy_arn = aws_iam_policy.apply_delivery.arn
 }
 
+data "aws_iam_policy_document" "apply_observability" {
+  statement {
+    sid       = "ManageRegionalObservability"
+    actions   = local.observability_actions
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.region]
+    }
+  }
+
+  statement {
+    sid       = "PublishRegisteredObservabilityMetrics"
+    actions   = ["cloudwatch:PutMetricData"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "cloudwatch:namespace"
+      values = [
+        "Accountable/GrafanaCapacity",
+        "Accountable/Observability",
+      ]
+    }
+  }
+
+  statement {
+    sid = "ManagePublicHealthChecks"
+    actions = [
+      "route53:ChangeTagsForResource",
+      "route53:CreateHealthCheck",
+      "route53:DeleteHealthCheck",
+      "route53:GetHealthCheck",
+      "route53:GetHealthCheckCount",
+      "route53:GetHealthCheckLastFailureReason",
+      "route53:ListHealthChecks",
+      "route53:ListTagsForResource",
+      "route53:UpdateHealthCheck",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_policy" "apply_observability" {
+  name   = "accountable-${var.environment}-observability"
+  policy = data.aws_iam_policy_document.apply_observability.json
+
+  depends_on = [aws_iam_role_policy.apply_iam]
+
+  lifecycle {
+    precondition {
+      condition     = length(replace(data.aws_iam_policy_document.apply_observability.json, "/\\s/", "")) <= 6144
+      error_message = "The observability IAM policy exceeds AWS's 6,144-character managed-policy limit."
+    }
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "apply_observability" {
+  role       = aws_iam_role.apply.name
+  policy_arn = aws_iam_policy.apply_observability.arn
+}
+
 data "aws_iam_policy_document" "apply_foundation" {
   statement {
     sid       = "ManageAccountPublicAccessBlock"
@@ -665,9 +950,30 @@ data "aws_iam_policy_document" "apply_foundation" {
   }
 
   statement {
-    sid       = "ManageApplicationRepository"
-    actions   = local.foundation_ecr_actions
-    resources = ["arn:aws:ecr:${var.region}:${var.account_id}:repository/accountable"]
+    sid     = "ManageRuntimeRepositories"
+    actions = local.foundation_ecr_actions
+    resources = [
+      "arn:aws:ecr:${var.region}:${var.account_id}:repository/accountable",
+      "arn:aws:ecr:${var.region}:${var.account_id}:repository/accountable-collector",
+      "arn:aws:ecr:${var.region}:${var.account_id}:repository/accountable-k6",
+    ]
+  }
+
+  statement {
+    sid = "ManageRegistryReplication"
+    actions = [
+      "ecr:DeleteRegistryPolicy",
+      "ecr:GetRegistryPolicy",
+      "ecr:PutRegistryPolicy",
+      "ecr:PutReplicationConfiguration",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.region]
+    }
   }
 
   statement {

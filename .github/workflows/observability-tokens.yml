@@ -1,0 +1,146 @@
+name: Observability token replacement
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment that owns the token
+        required: true
+        type: choice
+        options: [development, staging, production]
+      token:
+        description: Token to replace
+        required: true
+        type: choice
+        options: [proof-key, cell-otlp, environment-health, irm-api-token, irm-sns-endpoint, stack-plan, capacity-cloud, capacity-stack]
+      cell:
+        description: Cell that owns the OTLP token
+        required: false
+        type: string
+      phase:
+        description: Overlap-first replacement phase
+        required: true
+        type: choice
+        options: [write-standby, promote-standby, retire-previous]
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: observability-tokens-${{ inputs.environment }}-${{ inputs.token }}-${{ inputs.cell }}
+  cancel-in-progress: false
+
+jobs:
+  replace:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: ${{ inputs.environment }}
+    env:
+      AWS_REGION: eu-west-2
+      AWS_DEFAULT_REGION: eu-west-2
+      ENVIRONMENT: ${{ inputs.environment }}
+      TOKEN: ${{ inputs.token }}
+      CELL: ${{ inputs.cell }}
+      PHASE: ${{ inputs.phase }}
+      REPLACEMENT_TOKEN: ${{ secrets.OBSERVABILITY_REPLACEMENT_TOKEN }}
+    steps:
+      - name: Resolve the protected identity and token names
+        run: |
+          set -euo pipefail
+          case "$ENVIRONMENT" in
+            development) account=453722413624 ;;
+            staging) account=723225039926 ;;
+            production) account=576329195663 ;;
+          esac
+          case "$TOKEN" in
+            proof-key)
+              case "$ENVIRONMENT:$CELL" in
+                development:development-01|development:proof-01|staging:staging-01|production:production-01) ;;
+                *) echo "the cell does not belong to the selected environment" >&2; exit 2 ;;
+              esac
+              active="/accountable/$CELL/$ENVIRONMENT/api/proof-key-active"
+              standby="/accountable/$CELL/$ENVIRONMENT/api/proof-key-standby"
+              key="alias/accountable-$CELL"
+              ;;
+            cell-otlp)
+              case "$ENVIRONMENT:$CELL" in
+                development:development-01|development:proof-01|staging:staging-01|production:production-01) ;;
+                *) echo "the cell does not belong to the selected environment" >&2; exit 2 ;;
+              esac
+              active="/accountable/$CELL/$ENVIRONMENT/collector/grafana-otlp-token-active"
+              standby="/accountable/$CELL/$ENVIRONMENT/collector/grafana-otlp-token-standby"
+              key="alias/accountable-$CELL"
+              ;;
+            environment-health)
+              active="/accountable/observability/$ENVIRONMENT/grafana-health-token"
+              standby="/accountable/observability/$ENVIRONMENT/grafana-health-token-standby"
+              key="alias/accountable-$ENVIRONMENT-observability"
+              ;;
+            irm-api-token|irm-sns-endpoint)
+              active="/accountable/observability/$ENVIRONMENT/$TOKEN"
+              standby="$active-standby"
+              key="alias/accountable-$ENVIRONMENT-observability"
+              ;;
+            stack-plan|capacity-cloud|capacity-stack)
+              if [[ "$ENVIRONMENT" != "development" ]]; then
+                echo "$TOKEN is owned by the development account" >&2
+                exit 2
+              fi
+              case "$TOKEN" in
+                stack-plan) suffix=grafana-plan-token ;;
+                capacity-cloud) suffix=grafana-capacity-cloud-token ;;
+                capacity-stack) suffix=grafana-capacity-stack-token ;;
+              esac
+              active="/accountable/observability/development/$suffix"
+              standby="$active-standby"
+              key="alias/accountable-development-observability"
+              ;;
+          esac
+          echo "AWS_ROLE_ARN=arn:aws:iam::$account:role/accountable-$ENVIRONMENT-apply" >>"$GITHUB_ENV"
+          echo "ACTIVE_PARAMETER=$active" >>"$GITHUB_ENV"
+          echo "STANDBY_PARAMETER=$standby" >>"$GITHUB_ENV"
+          echo "TOKEN_KEY=$key" >>"$GITHUB_ENV"
+
+      - name: Request protected apply identity
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const token = await core.getIDToken("sts.amazonaws.com");
+            const tokenPath = path.join(process.env.RUNNER_TEMP, "aws-observability-token-replacement");
+            fs.writeFileSync(tokenPath, token, { mode: 0o600 });
+            core.exportVariable("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath);
+
+      - name: Replace the selected token
+        run: |
+          set -euo pipefail
+          case "$PHASE" in
+            write-standby)
+              : "${REPLACEMENT_TOKEN:?the protected replacement token is required}"
+              aws ssm put-parameter \
+                --name "$STANDBY_PARAMETER" \
+                --type SecureString \
+                --key-id "$TOKEN_KEY" \
+                --value "$REPLACEMENT_TOKEN" \
+                --overwrite >/dev/null
+              ;;
+            promote-standby)
+              value="$(aws ssm get-parameter --name "$STANDBY_PARAMETER" --with-decryption --query 'Parameter.Value' --output text)"
+              aws ssm put-parameter \
+                --name "$ACTIVE_PARAMETER" \
+                --type SecureString \
+                --key-id "$TOKEN_KEY" \
+                --value "$value" \
+                --overwrite >/dev/null
+              unset value
+              ;;
+            retire-previous)
+              aws ssm delete-parameter --name "$STANDBY_PARAMETER" >/dev/null
+              ;;
+          esac
+          echo "completed $PHASE for $TOKEN in $ENVIRONMENT"

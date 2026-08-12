@@ -21,7 +21,7 @@ func (ArchitectureProbeServer) Correlate(
 	identity := apierror.IdentityFromContext(ctx)
 	return connect.NewResponse(&probev1.CorrelateResponse{
 		RequestId: identity.RequestID,
-		TraceId:   identity.TraceID,
+		TraceId:   identity.CorrelationID,
 	}), nil
 }
 
@@ -37,7 +37,7 @@ func (ArchitectureProbeServer) CookieRoundTrip(
 	response := connect.NewResponse(&probev1.CookieRoundTripResponse{
 		CookieReceived: received,
 		RequestId:      identity.RequestID,
-		TraceId:        identity.TraceID,
+		TraceId:        identity.CorrelationID,
 	})
 	if req.Msg.GetSetCookie() {
 		response.Header().Add("Set-Cookie", (&http.Cookie{
@@ -95,7 +95,7 @@ func (ArchitectureProbeServer) Wait(
 		identity := apierror.IdentityFromContext(ctx)
 		return connect.NewResponse(&probev1.WaitResponse{
 			RequestId: identity.RequestID,
-			TraceId:   identity.TraceID,
+			TraceId:   identity.CorrelationID,
 		}), nil
 	}
 }
@@ -130,7 +130,7 @@ func (ArchitectureProbeServer) Stream(
 		if err := stream.Send(&probev1.StreamResponse{
 			Sequence:  sequence,
 			RequestId: identity.RequestID,
-			TraceId:   identity.TraceID,
+			TraceId:   identity.CorrelationID,
 		}); err != nil {
 			return err
 		}

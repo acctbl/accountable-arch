@@ -1,6 +1,8 @@
 extensions:
-  bearertokenauth/grafana:
-    filename: /run/accountable/grafana-token
+  basicauth/grafana:
+    client_auth:
+      username: '1765140'
+      password: 'collector-proof-token'
 receivers:
   otlp/app:
     protocols:
@@ -14,19 +16,158 @@ receivers:
     config:
       scrape_configs:
         - job_name: collector
+          scrape_interval: 30s
           static_configs:
-            - targets: ["127.0.0.1:8888"]
+            - targets: ['127.0.0.1:8888']
 processors:
   memory_limiter:
     check_interval: 1s
     limit_percentage: 75
     spike_limit_percentage: 15
   batch:
+  filter/identity:
+    error_mode: ignore
+    traces:
+      span:
+        - 'resource.attributes["deployment.environment.name"] != nil and resource.attributes["deployment.environment.name"] != "development"'
+        - 'resource.attributes["accountable.cell.id"] != nil and resource.attributes["accountable.cell.id"] != "dev-a"'
+    metrics:
+      datapoint:
+        - 'resource.attributes["deployment.environment.name"] != nil and resource.attributes["deployment.environment.name"] != "development"'
+        - 'resource.attributes["accountable.cell.id"] != nil and resource.attributes["accountable.cell.id"] != "dev-a"'
+    logs:
+      log_record:
+        - 'resource.attributes["deployment.environment.name"] != nil and resource.attributes["deployment.environment.name"] != "development"'
+        - 'resource.attributes["accountable.cell.id"] != nil and resource.attributes["accountable.cell.id"] != "dev-a"'
+  transform/identity:
+    error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements:
+          - 'set(attributes["deployment.environment.name"], "development")'
+          - 'set(attributes["accountable.cell.id"], "dev-a")'
+    metric_statements:
+      - context: resource
+        statements:
+          - 'set(attributes["deployment.environment.name"], "development")'
+          - 'set(attributes["accountable.cell.id"], "dev-a")'
+    log_statements:
+      - context: resource
+        statements:
+          - 'set(attributes["deployment.environment.name"], "development")'
+          - 'set(attributes["accountable.cell.id"], "dev-a")'
+  transform/allowlist:
+    error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements:
+          - 'keep_keys(attributes, ["service.name", "service.version", "deployment.environment.name", "accountable.cell.id", "accountable.runtime.role", "accountable.release.id", "accountable.configuration.schema_version", "accountable.configuration.revision", "accountable.configuration.fingerprint", "accountable.telemetry.protocol", "accountable.telemetry.sampling.policy", "accountable.telemetry.redaction.policy.version"])'
+      - context: scope
+        statements:
+          - 'keep_keys(attributes, ["accountable.reserved.none"])'
+      - context: span
+        statements:
+          - 'keep_keys(attributes, ["action_code", "causation_id", "correlation_id", "drop_count", "error_category", "event.name", "event_id", "event_name", "module", "operation_class", "operation_id", "outcome", "problem_id", "proof_type", "reason", "request_id", "route_class", "rpc_method", "rpc_service"])'
+    log_statements:
+      - context: resource
+        statements:
+          - 'keep_keys(attributes, ["service.name", "service.version", "deployment.environment.name", "accountable.cell.id", "accountable.runtime.role", "accountable.release.id", "accountable.configuration.schema_version", "accountable.configuration.revision", "accountable.configuration.fingerprint", "accountable.telemetry.protocol", "accountable.telemetry.sampling.policy", "accountable.telemetry.redaction.policy.version"])'
+      - context: scope
+        statements:
+          - 'keep_keys(attributes, ["accountable.reserved.none"])'
+      - context: log
+        statements:
+          - 'keep_keys(attributes, ["action_code", "causation_id", "correlation_id", "drop_count", "error_category", "event.name", "event_id", "event_name", "module", "operation_class", "operation_id", "outcome", "problem_id", "proof_type", "reason", "request_id", "route_class", "rpc_method", "rpc_service"])'
+    metric_statements:
+      - context: resource
+        statements:
+          - 'keep_keys(attributes, ["service.name", "service.version", "deployment.environment.name", "accountable.cell.id", "accountable.runtime.role", "accountable.release.id", "accountable.configuration.schema_version", "accountable.configuration.revision", "accountable.configuration.fingerprint", "accountable.telemetry.protocol", "accountable.telemetry.sampling.policy", "accountable.telemetry.redaction.policy.version"])'
+      - context: scope
+        statements:
+          - 'keep_keys(attributes, ["accountable.reserved.none"])'
+      - context: datapoint
+        statements:
+          - 'keep_keys(attributes, ["accountable.cell.id", "accountable.configuration.fingerprint", "accountable.configuration.revision", "accountable.configuration.schema_version", "accountable.release.id", "accountable.runtime.role", "client_application", "client_artifact_digest", "client_artifact_type", "configuration_fingerprint", "configuration_revision", "configuration_schema_version", "deployment.environment.name", "error_category", "event_name", "operation_class", "outcome", "proof_type", "release_id", "route_class", "rpc_method", "rpc_service", "service.name", "service.version"])'
+  transform/runtime_identity_labels:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          - 'set(attributes["service.name"], resource.attributes["service.name"]) where resource.attributes["service.name"] != nil'
+          - 'set(attributes["service.version"], resource.attributes["service.version"]) where resource.attributes["service.version"] != nil'
+          - 'set(attributes["deployment.environment.name"], resource.attributes["deployment.environment.name"]) where resource.attributes["deployment.environment.name"] != nil'
+          - 'set(attributes["accountable.cell.id"], resource.attributes["accountable.cell.id"]) where resource.attributes["accountable.cell.id"] != nil'
+          - 'set(attributes["accountable.runtime.role"], resource.attributes["accountable.runtime.role"]) where resource.attributes["accountable.runtime.role"] != nil'
+          - 'set(attributes["accountable.release.id"], resource.attributes["accountable.release.id"]) where resource.attributes["accountable.release.id"] != nil'
+          - 'set(attributes["accountable.configuration.schema_version"], resource.attributes["accountable.configuration.schema_version"]) where resource.attributes["accountable.configuration.schema_version"] != nil'
+          - 'set(attributes["accountable.configuration.revision"], resource.attributes["accountable.configuration.revision"]) where resource.attributes["accountable.configuration.revision"] != nil'
+          - 'set(attributes["accountable.configuration.fingerprint"], resource.attributes["accountable.configuration.fingerprint"]) where resource.attributes["accountable.configuration.fingerprint"] != nil'
+  filter/sli:
+    error_mode: ignore
+    metrics:
+      metric:
+        - 'name != "accountable.sli.request.eligible" and name != "accountable.sli.availability.bad" and name != "accountable.sli.latency.slow" and name != "accountable.sli.export.heartbeat"'
+        - 'type != 2'
+        - 'aggregation_temporality != 1'
+        - 'is_monotonic != true'
+      datapoint:
+        - 'Len(attributes) > 0'
+        - 'value_int < 0'
+        - 'value_double < 0'
+  transform/sli:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        statements:
+          - 'set(name, "EligibleRequestCount") where name == "accountable.sli.request.eligible"'
+          - 'set(name, "AvailabilityBadRequestCount") where name == "accountable.sli.availability.bad"'
+          - 'set(name, "LatencySlowRequestCount") where name == "accountable.sli.latency.slow"'
+          - 'set(name, "SLIExportHeartbeatCount") where name == "accountable.sli.export.heartbeat"'
+      - context: datapoint
+        statements:
+          - 'set(attributes["Environment"], "development")'
+          - 'set(attributes["ServiceName"], "accountable-api")'
+          - 'set(attributes["CellId"], "dev-a") where metric.name == "SLIExportHeartbeatCount"'
+  filter/internal:
+    error_mode: ignore
+    metrics:
+      metric:
+        - 'name != "otelcol_AcceptedItemCount_total" and name != "otelcol_SentItemCount_total" and name != "otelcol_PermanentlyDroppedItemCount_total" and name != "otelcol_PendingItemCount" and name != "otelcol_OldestPendingItemAgeSeconds" and name != "otelcol_process_uptime_seconds_total" and name != "otelcol_process_memory_rss_bytes" and name != "otelcol_receiver_refused_spans_total" and name != "otelcol_receiver_refused_metric_points_total" and name != "otelcol_receiver_refused_log_records_total"'
+  transform/internal:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          - 'set(attributes["Pipeline"], "traces/app") where metric.name == "otelcol_receiver_refused_spans_total" and attributes["receiver"] == "otlp/app"'
+          - 'set(attributes["Signal"], "traces") where metric.name == "otelcol_receiver_refused_spans_total" and attributes["receiver"] == "otlp/app"'
+          - 'set(attributes["Pipeline"], "metrics/app") where metric.name == "otelcol_receiver_refused_metric_points_total" and attributes["receiver"] == "otlp/app"'
+          - 'set(attributes["Signal"], "metrics") where metric.name == "otelcol_receiver_refused_metric_points_total" and attributes["receiver"] == "otlp/app"'
+          - 'set(attributes["Pipeline"], "logs/app") where metric.name == "otelcol_receiver_refused_log_records_total" and attributes["receiver"] == "otlp/app"'
+          - 'set(attributes["Signal"], "logs") where metric.name == "otelcol_receiver_refused_log_records_total" and attributes["receiver"] == "otlp/app"'
+          - 'set(attributes["Pipeline"], "metrics/slo") where metric.name == "otelcol_receiver_refused_metric_points_total" and attributes["receiver"] == "otlp/slo"'
+          - 'set(attributes["Signal"], "metrics") where metric.name == "otelcol_receiver_refused_metric_points_total" and attributes["receiver"] == "otlp/slo"'
+          - 'set(attributes["Environment"], "development") where IsMatch(metric.name, "^otelcol_receiver_refused_")'
+          - 'set(attributes["CellId"], "dev-a") where IsMatch(metric.name, "^otelcol_receiver_refused_")'
+          - 'delete_key(attributes, "receiver")'
+          - 'delete_key(attributes, "transport")'
+          - 'set(attributes["Environment"], "development") where metric.name == "otelcol_process_uptime_seconds_total" or metric.name == "otelcol_process_memory_rss_bytes"'
+          - 'set(attributes["CellId"], "dev-a") where metric.name == "otelcol_process_uptime_seconds_total" or metric.name == "otelcol_process_memory_rss_bytes"'
+          - 'set(attributes["CollectorTaskId"], "0123456789abcdef0123456789abcdef") where metric.name == "otelcol_process_uptime_seconds_total" or metric.name == "otelcol_process_memory_rss_bytes"'
+      - context: metric
+        statements:
+          - 'set(name, "AcceptedItemCount") where name == "otelcol_AcceptedItemCount_total"'
+          - 'set(name, "SentItemCount") where name == "otelcol_SentItemCount_total"'
+          - 'set(name, "PermanentlyDroppedItemCount") where name == "otelcol_PermanentlyDroppedItemCount_total"'
+          - 'set(name, "PendingItemCount") where name == "otelcol_PendingItemCount"'
+          - 'set(name, "OldestPendingItemAgeSeconds") where name == "otelcol_OldestPendingItemAgeSeconds"'
+          - 'set(name, "CollectorUptimeSeconds") where name == "otelcol_process_uptime_seconds_total"'
+          - 'set(name, "CollectorMemoryRssBytes") where name == "otelcol_process_memory_rss_bytes"'
+          - 'set(name, "RefusedItemCount") where IsMatch(name, "^otelcol_receiver_refused_")'
 exporters:
   accountable_delivery/grafana:
     endpoint: https://otlp-gateway.example/otlp
     auth:
-      authenticator: bearertokenauth/grafana
+      authenticator: basicauth/grafana
     environment: development
     cell_id: dev-a
     collector_task_id: 0123456789abcdef0123456789abcdef
@@ -37,36 +178,53 @@ exporters:
       enabled: true
       sizer: items
       queue_size: 10000
-  awsemf/slo:
+  accountable_emf/sli:
+    region: eu-west-2
+    mode: sli
     namespace: Accountable/SLO
-    dimension_rollup_option: NoDimensionRollup
-    sending_queue:
-      enabled: false
-    retry_on_failure:
-      enabled: false
-  awsemf/internal:
+    log_group_name: /accountable/dev-a/emf-sli
+    log_stream_name: 0123456789abcdef0123456789abcdef
+    environment: development
+    cell_id: dev-a
+  accountable_emf/internal:
+    region: eu-west-2
+    mode: internal
     namespace: Accountable/Collector
-    dimension_rollup_option: NoDimensionRollup
+    log_group_name: /accountable/dev-a/emf-internal
+    log_stream_name: 0123456789abcdef0123456789abcdef
+    environment: development
+    cell_id: dev-a
 service:
-  extensions: [bearertokenauth/grafana]
+  extensions: [basicauth/grafana]
+  telemetry:
+    logs:
+      encoding: json
+    metrics:
+      level: normal
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: '127.0.0.1'
+                port: 8888
   pipelines:
     traces/app:
       receivers: [otlp/app]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, filter/identity, transform/identity, transform/allowlist, batch]
       exporters: [accountable_delivery/grafana]
     metrics/app:
       receivers: [otlp/app]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, filter/identity, transform/identity, transform/allowlist, transform/runtime_identity_labels, batch]
       exporters: [accountable_delivery/grafana]
     logs/app:
       receivers: [otlp/app]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, filter/identity, transform/identity, transform/allowlist, batch]
       exporters: [accountable_delivery/grafana]
     metrics/slo:
       receivers: [otlp/slo]
-      processors: [memory_limiter]
-      exporters: [awsemf/slo]
+      processors: [memory_limiter, filter/sli, transform/sli]
+      exporters: [accountable_emf/sli]
     metrics/internal:
       receivers: [prometheus/internal]
-      processors: [memory_limiter, batch]
-      exporters: [awsemf/internal]
+      processors: [memory_limiter, filter/internal, transform/internal, batch]
+      exporters: [accountable_emf/internal]

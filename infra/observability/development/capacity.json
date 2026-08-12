@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "handler": "capacity",
+  "region": "eu-west-2",
+  "environment": "development",
+  "stack_name": "acctbl",
+  "grafana_base_url": "https://grafana.com",
+  "organization_slug": "acctbl",
+  "token_parameter": "/accountable/observability/development/grafana-capacity-cloud-token",
+  "stack_token_parameter": "/accountable/observability/development/grafana-capacity-stack-token",
+  "approved_plan": "free",
+  "queries": []
+}

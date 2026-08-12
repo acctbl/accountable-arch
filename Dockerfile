@@ -18,6 +18,7 @@ RUN CGO_ENABLED=0 GOARCH="$TARGETARCH" GOOS="$TARGETOS" go build -trimpath -ldfl
     CGO_ENABLED=0 GOARCH="$TARGETARCH" GOOS="$TARGETOS" go build -trimpath -ldflags="-s -w -buildid=" -o /out/accountable-bootstrap ./cmd/bootstrap && \
     CGO_ENABLED=0 GOARCH="$TARGETARCH" GOOS="$TARGETOS" go build -trimpath -ldflags="-s -w -buildid=" -o /out/accountable-migrate ./cmd/migrate && \
     CGO_ENABLED=0 GOARCH="$TARGETARCH" GOOS="$TARGETOS" go build -trimpath -ldflags="-s -w -buildid=" -o /out/accountable-preflight ./cmd/preflight && \
+    CGO_ENABLED=0 GOARCH="$TARGETARCH" GOOS="$TARGETOS" go build -trimpath -ldflags="-s -w -buildid=" -o /out/accountable-collector-init ./cmd/collector-init && \
     mkdir -p /out/runtime
 
 FROM alpine:3.23.3@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659
@@ -28,9 +29,11 @@ COPY --from=build /out/accountable-api /usr/local/bin/accountable-api
 COPY --from=build /out/accountable-bootstrap /usr/local/bin/accountable-bootstrap
 COPY --from=build /out/accountable-migrate /usr/local/bin/accountable-migrate
 COPY --from=build /out/accountable-preflight /usr/local/bin/accountable-preflight
-COPY --from=build --chown=65532:65532 /out/runtime /run/accountable
+COPY --from=build /out/accountable-collector-init /usr/local/bin/accountable-collector-init
+COPY --from=build --chown=65532:65532 --chmod=0700 /out/runtime /run/accountable
 COPY --chmod=0555 docker/runtime-entrypoint.sh /usr/local/bin/accountable-entrypoint
 
+VOLUME ["/run/accountable"]
 USER 65532:65532
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/accountable-entrypoint"]

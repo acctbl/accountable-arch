@@ -18,6 +18,11 @@ variable "github_oidc_subject_prefix" {
   type        = string
 }
 
+variable "github_repository" {
+  description = "GitHub owner and repository used in exact workflow references"
+  type        = string
+}
+
 variable "region" {
   description = "AWS region containing the environment state backend"
   type        = string

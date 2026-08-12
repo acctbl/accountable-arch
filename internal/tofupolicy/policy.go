@@ -228,6 +228,12 @@ func resourceViolations(resources []plannedResource, imageProofs map[string]bool
 				(!fieldIsUnknown(resource.Unknown, "container_definitions") || !imageProofs[resource.Address]) {
 				violations = append(violations, violation(resource, "every task image must use a sha256 digest"))
 			}
+			if taskUsesTmpfs(resource.Values["container_definitions"]) {
+				violations = append(violations, violation(resource, "Fargate tasks must not use linuxParameters.tmpfs"))
+			}
+			if taskWritesOutsideTheScratchVolume(resource.Values["container_definitions"]) {
+				violations = append(violations, violation(resource, "every container mount must be the task-scoped runtime scratch volume"))
+			}
 		case "aws_cloudfront_distribution":
 			webACL, _ := resource.Values["web_acl_id"].(string)
 			webACLUnknown, _ := resource.Unknown["web_acl_id"].(bool)
@@ -424,6 +430,50 @@ func taskImagesUseDigests(value any) bool {
 		}
 	}
 	return true
+}
+
+const scratchVolumeName = "runtime-scratch"
+
+func decodeContainerDefinitions(value any) []containerDefinition {
+	definitions, ok := value.(string)
+	if !ok || definitions == "" {
+		return nil
+	}
+	var containers []containerDefinition
+	if err := json.Unmarshal([]byte(definitions), &containers); err != nil {
+		return nil
+	}
+	return containers
+}
+
+type containerDefinition struct {
+	LinuxParameters struct {
+		Tmpfs []json.RawMessage `json:"tmpfs"`
+	} `json:"linuxParameters"`
+	MountPoints []struct {
+		ContainerPath string `json:"containerPath"`
+		SourceVolume  string `json:"sourceVolume"`
+	} `json:"mountPoints"`
+}
+
+func taskUsesTmpfs(value any) bool {
+	for _, container := range decodeContainerDefinitions(value) {
+		if len(container.LinuxParameters.Tmpfs) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func taskWritesOutsideTheScratchVolume(value any) bool {
+	for _, container := range decodeContainerDefinitions(value) {
+		for _, mount := range container.MountPoints {
+			if mount.SourceVolume != scratchVolumeName || mount.ContainerPath != "/run/accountable" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func cachePolicyDisablesCaching(values map[string]any) bool {

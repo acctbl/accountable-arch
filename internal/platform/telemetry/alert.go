@@ -52,7 +52,7 @@ func ValidateAlertMetadata(metadata AlertMetadata) error {
 	}
 	switch metadata.Scope {
 	case "stack":
-		if metadata.StackName != "accountableshared" || metadata.Environment != "" || metadata.CellID != "" {
+		if metadata.StackName != GrafanaStackSlug || metadata.Environment != "" || metadata.CellID != "" {
 			return contractError("stack alert scope")
 		}
 	case "environment":

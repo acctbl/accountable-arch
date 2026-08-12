@@ -1,0 +1,36 @@
+dist:
+  name: accountable-collector
+  description: Minimum Accountable cell Collector
+  output_path: ./dist/collector
+  # The generated module stays below the repository module path so the owned
+  # exporter under internal/platform/telemetry remains importable.
+  module: github.com/acctbl/accountable/dist/collector
+  version: 0.1.0
+
+receivers:
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.158.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver v0.158.0
+
+processors:
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.158.0
+  - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.158.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/filterprocessor v0.158.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/transformprocessor v0.158.0
+
+exporters:
+  - gomod: github.com/acctbl/accountable v0.0.0
+    import: github.com/acctbl/accountable/internal/platform/telemetry/delivery
+    name: accountabledelivery
+  - gomod: github.com/acctbl/accountable v0.0.0
+    import: github.com/acctbl/accountable/internal/platform/telemetry/emf
+    name: accountableemf
+
+extensions:
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/basicauthextension v0.158.0
+
+providers:
+  - gomod: go.opentelemetry.io/collector/confmap/provider/envprovider v1.64.0
+  - gomod: go.opentelemetry.io/collector/confmap/provider/fileprovider v1.64.0
+
+replaces:
+  - github.com/acctbl/accountable => ../..

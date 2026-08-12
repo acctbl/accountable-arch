@@ -16,8 +16,8 @@ var uuidV7 = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-
 
 func TestNewAttachesSafeProblemDetail(t *testing.T) {
 	ctx := apierror.WithIdentity(context.Background(), apierror.Identity{
-		RequestID: "01989c6a-bd3d-7b71-89f8-19f5c5f698ad",
-		TraceID:   "browser-trace",
+		RequestID:     "01989c6a-bd3d-7b71-89f8-19f5c5f698ad",
+		CorrelationID: "browser-trace",
 	})
 	err := apierror.New(ctx, apierror.Unavailable, "errors.unavailable", nil, 2*time.Second)
 

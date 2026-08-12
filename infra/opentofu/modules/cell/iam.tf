@@ -41,8 +41,12 @@ data "aws_iam_policy_document" "execution" {
   }
 
   statement {
-    actions   = local.execution_repository_actions
-    resources = [var.image_repository_arn]
+    actions = local.execution_repository_actions
+    resources = compact([
+      var.image_repository_arn,
+      var.collector_image_repository_arn,
+      var.synthetic_image_repository_arn,
+    ])
   }
 
   statement {
@@ -83,6 +87,63 @@ resource "aws_iam_role_policy" "bootstrap_execution" {
   role   = aws_iam_role.bootstrap_execution.id
 }
 
+resource "aws_iam_role" "synthetic_execution" {
+  count = var.synthetic_observation_enabled ? 1 : 0
+
+  name               = "${local.name}-synthetic-execution"
+  assume_role_policy = data.aws_iam_policy_document.ecs_task_assume.json
+}
+
+data "aws_iam_policy_document" "synthetic_execution" {
+  count = var.synthetic_observation_enabled ? 1 : 0
+
+  statement {
+    actions   = local.execution_global_actions
+    resources = ["*"]
+  }
+
+  statement {
+    actions   = local.execution_repository_actions
+    resources = [var.synthetic_image_repository_arn]
+  }
+
+  statement {
+    actions   = local.execution_log_actions
+    resources = ["${aws_cloudwatch_log_group.runtime.arn}:*"]
+  }
+
+  statement {
+    actions   = local.parameter_read_actions
+    resources = ["${local.parameter_arn_prefix}/api/proof-key-active"]
+  }
+
+  statement {
+    actions   = ["kms:Decrypt"]
+    resources = [aws_kms_key.cell.arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["ssm.${data.aws_region.current.region}.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "synthetic_execution" {
+  count = var.synthetic_observation_enabled ? 1 : 0
+
+  name   = "${local.name}-synthetic-execution"
+  policy = data.aws_iam_policy_document.synthetic_execution[0].json
+  role   = aws_iam_role.synthetic_execution[0].id
+}
+
+resource "aws_iam_role" "synthetic" {
+  count = var.synthetic_observation_enabled ? 1 : 0
+
+  name               = "${local.name}-synthetic"
+  assume_role_policy = data.aws_iam_policy_document.ecs_task_assume.json
+}
+
 resource "aws_iam_role" "api" {
   name               = "${local.name}-api"
   assume_role_policy = data.aws_iam_policy_document.ecs_task_assume.json
@@ -118,8 +179,12 @@ data "aws_iam_policy_document" "api" {
   }
 
   statement {
-    actions   = local.parameter_read_actions
-    resources = ["${local.parameter_arn_prefix}/api/*"]
+    actions = local.parameter_read_actions
+    resources = [
+      "${local.parameter_arn_prefix}/api/database-password",
+      "${local.parameter_arn_prefix}/api/proof-key-active",
+      "${local.parameter_arn_prefix}/api/proof-key-standby",
+    ]
   }
 }
 
@@ -137,7 +202,7 @@ resource "aws_iam_role" "migrate" {
 data "aws_iam_policy_document" "migrate" {
   statement {
     actions   = local.parameter_read_actions
-    resources = ["${local.parameter_arn_prefix}/migrate/*"]
+    resources = ["${local.parameter_arn_prefix}/migrate/database-password"]
   }
 
   statement {

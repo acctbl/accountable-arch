@@ -1,0 +1,115 @@
+name: Synthetic workload image
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Immutable image tag
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: synthetic-workload-image
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/require-green-ci.yml
+    permissions:
+      actions: read
+      contents: read
+
+  build:
+    if: github.ref == 'refs/heads/main'
+    needs: ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment:
+      name: development
+    env:
+      AWS_REGION: eu-west-2
+      AWS_DEFAULT_REGION: eu-west-2
+      AWS_ROLE_ARN: arn:aws:iam::453722413624:role/accountable-development-apply
+      IMAGE_REPOSITORY: 453722413624.dkr.ecr.eu-west-2.amazonaws.com/accountable-k6
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.7.13
+
+      - name: Request AWS apply identity
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const token = await core.getIDToken("sts.amazonaws.com");
+            const tokenPath = path.join(process.env.RUNNER_TEMP, "aws-synthetic-image-token");
+            fs.writeFileSync(tokenPath, token, { mode: 0o600 });
+            core.exportVariable("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath);
+
+      - name: Validate the immutable tag
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$REVISION" =~ ^[-A-Za-z0-9._]{1,128}$ ]]; then
+            echo "revision is invalid" >&2
+            exit 2
+          fi
+
+      - name: Create Buildx builder for attestations
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Sign in to ECR
+        run: |
+          set -euo pipefail
+          aws ecr get-login-password --region "$AWS_REGION" |
+            docker login --username AWS --password-stdin "${IMAGE_REPOSITORY%%/*}"
+
+      - name: Build and push the pinned ARM64 image
+        id: build
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: docker/k6/Dockerfile
+          platforms: linux/arm64
+          provenance: mode=max
+          sbom: true
+          push: true
+          tags: ${{ env.IMAGE_REPOSITORY }}:${{ inputs.revision }}
+
+      - name: Scan the published image
+        run: |
+          set -euo pipefail
+          mise exec -- trivy image \
+            --exit-code 1 \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            "$IMAGE_REPOSITORY@${{ steps.build.outputs.digest }}"
+
+      - name: Sign and verify the image digest
+        run: |
+          set -euo pipefail
+          mise exec -- cosign sign --yes "$IMAGE_REPOSITORY@${{ steps.build.outputs.digest }}"
+          mise exec -- cosign verify \
+            --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/k6-image.yml@refs/heads/main" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE_REPOSITORY@${{ steps.build.outputs.digest }}" >/dev/null
+
+      - name: Report the pinned digest
+        run: |
+          set -euo pipefail
+          echo "### Synthetic workload image" >>"$GITHUB_STEP_SUMMARY"
+          echo "" >>"$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >>"$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >>"$GITHUB_STEP_SUMMARY"
+          echo "| synthetic_image_uri | \`$IMAGE_REPOSITORY@${{ steps.build.outputs.digest }}\` |" >>"$GITHUB_STEP_SUMMARY"

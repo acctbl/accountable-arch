@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "handler": "canary",
+  "region": "eu-west-2",
+  "environment": "staging",
+  "stack_name": "acctbl",
+  "grafana_base_url": "https://acctbl.grafana.net",
+  "token_parameter": "/accountable/observability/staging/grafana-health-token",
+  "queries": [
+    {"name":"metrics_current","kind":"metrics","data_source":"grafanacloud-acctbl-prom","expression":"accountable_sli_export_heartbeat"},
+    {"name":"critical_alerts_clear","kind":"metrics","data_source":"grafanacloud-acctbl-prom","expression":"sum(grafana_alerting_alerts{state=\"firing\",severity=\"critical\",environment=\"staging\"}) or vector(0)","result_contract":"zero"},
+    {"name":"logs_current","kind":"logs","data_source":"grafanacloud-acctbl-logs","expression":"{deployment_environment_name=\"staging\"}"},
+    {"name":"traces_current","kind":"traces","data_source":"grafanacloud-acctbl-traces","expression":"{ resource.deployment.environment.name = \"staging\" }"},
+    {"name":"cloudwatch_current","kind":"cloudwatch","data_source":"accountable-staging-cloudwatch","namespace":"Accountable/SLO","metric_name":"SLIExportHeartbeatCount"},
+    {"name":"dashboards_reachable","kind":"path","path":"/api/search?tag=accountable-staging&type=dash-db","result_contract":"dashboard-set","expected":["accountable-staging-service-identity","accountable-staging-slo-budget","accountable-staging-server-dependencies","accountable-staging-browser-vitals","accountable-staging-collector-capacity","accountable-staging-alerts-deployments"]},
+    {"name":"alert_rules_reachable","kind":"path","path":"/api/prometheus/grafana/api/v1/rules","result_contract":"healthy-alert-rules"}
+  ]
+}

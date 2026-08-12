@@ -44,7 +44,7 @@ func TestProductionRouterBoundsStalledUnaryWork(t *testing.T) {
 		AllowedOrigins:    []string{"https://shell.example"},
 		UnaryRPCDeadline:  25 * time.Millisecond,
 		StreamRPCDeadline: time.Second,
-	}, ready, stallingSystemServer{})
+	}, ready, testRelease(), nil, stallingSystemServer{})
 	httpServer := httptest.NewServer(handler)
 	t.Cleanup(httpServer.Close)
 
@@ -94,13 +94,14 @@ func TestProductionRouterIntegration(t *testing.T) {
 		AllowedOrigins:    []string{"https://shell.example"},
 		UnaryRPCDeadline:  5 * time.Second,
 		StreamRPCDeadline: 25 * time.Second,
-	}, ready)
+	}, ready, testRelease(), nil)
 	httpServer := httptest.NewServer(handler)
 	t.Cleanup(httpServer.Close)
 
 	systemClient := systemv1connect.NewSystemServiceClient(httpServer.Client(), httpServer.URL)
 	systemRequest := connect.NewRequest(&systemv1.GetRuntimeRequest{})
-	systemRequest.Header().Set("X-Trace-ID", "browser-journey-1")
+	journey := "019261bb-4c10-7f3a-9aaa-0f1e2d3c4b5a"
+	systemRequest.Header().Set("X-Correlation-ID", journey)
 	runtime, err := systemClient.GetRuntime(context.Background(), systemRequest)
 	if err != nil {
 		t.Fatalf("GetRuntime through production router: %v", err)
@@ -111,13 +112,15 @@ func TestProductionRouterIntegration(t *testing.T) {
 	if runtime.Msg.GetRequestId() == "browser-journey-1" {
 		t.Fatal("request and trace IDs must be distinct")
 	}
-	if runtime.Header().Get("X-Request-ID") != runtime.Msg.GetRequestId() || runtime.Header().Get("X-Trace-ID") != "browser-journey-1" {
+	if runtime.Header().Get("X-Request-ID") != runtime.Msg.GetRequestId() ||
+		runtime.Header().Get("X-Correlation-ID") != journey ||
+		runtime.Header().Get("X-Request-ID") == journey {
 		t.Fatalf("correlation headers do not match response: %v", runtime.Header())
 	}
 
 	probeClient := probev1connect.NewArchitectureProbeServiceClient(httpServer.Client(), httpServer.URL)
 	failRequest := connect.NewRequest(&probev1.FailRequest{Kind: probev1.FailureKind_FAILURE_KIND_INVALID_INPUT})
-	failRequest.Header().Set("X-Trace-ID", "browser-journey-2")
+	failRequest.Header().Set("X-Correlation-ID", "019261bb-4c10-7f3a-9aaa-0f1e2d3c4b5b")
 	_, err = probeClient.Fail(context.Background(), failRequest)
 	var connectErr *connect.Error
 	if !errors.As(err, &connectErr) || connectErr.Code() != connect.CodeInvalidArgument {
@@ -185,7 +188,7 @@ func TestArchitectureProbeGateAndRuntimeMiddlewareIntegration(t *testing.T) {
 
 	ready := &readiness{}
 	ready.Set(true)
-	disabledServer := httptest.NewServer(newAPIHandler(config{}, ready))
+	disabledServer := httptest.NewServer(newAPIHandler(config{}, ready, testRelease(), nil))
 	t.Cleanup(disabledServer.Close)
 	response, err := disabledServer.Client().Post(
 		disabledServer.URL+probev1connect.ArchitectureProbeServiceCorrelateProcedure,
@@ -206,7 +209,7 @@ func TestArchitectureProbeGateAndRuntimeMiddlewareIntegration(t *testing.T) {
 		UnaryRPCDeadline:  5 * time.Second,
 		StreamRPCDeadline: 25 * time.Second,
 		Foundation:        bootstrap.Config{Revision: "release-under-proof"},
-	}, ready))
+	}, ready, testRelease(), nil))
 	t.Cleanup(enabledServer.Close)
 	preflight, err := http.NewRequest(http.MethodOptions,
 		enabledServer.URL+probev1connect.ArchitectureProbeServiceCorrelateProcedure, nil)
@@ -273,15 +276,32 @@ func TestArchitectureProbeGateAndRuntimeMiddlewareIntegration(t *testing.T) {
 	if liveResponse.StatusCode != http.StatusOK {
 		t.Fatalf("liveness status = %d", liveResponse.StatusCode)
 	}
-	var liveBody map[string]string
+	var liveBody struct {
+		Status                     string `json:"status"`
+		ReleaseID                  string `json:"release_id"`
+		ServiceVersion             string `json:"service_version"`
+		ConfigurationSchemaVersion int    `json:"configuration_schema_version"`
+		ConfigurationRevision      string `json:"configuration_revision"`
+		ConfigurationFingerprint   string `json:"configuration_fingerprint"`
+		RequestID                  string `json:"request_id"`
+		CorrelationID              string `json:"correlation_id"`
+	}
 	if err := json.NewDecoder(liveResponse.Body).Decode(&liveBody); err != nil {
 		t.Fatalf("decode liveness body: %v", err)
 	}
 	_ = liveResponse.Body.Close()
-	if len(liveBody) != 3 || liveBody["status"] != "ok" || liveBody["release_id"] != "release-under-proof" ||
-		!integrationUUIDV7.MatchString(liveBody["request_id"]) ||
-		liveResponse.Header.Get("X-Request-ID") != liveBody["request_id"] {
-		t.Fatalf("liveness body or headers = (%v, %v)", liveBody, liveResponse.Header)
+	release := testRelease()
+	// Release, artifact, and configuration identity stay separate, and a health
+	// call starts one root journey, so correlation equals request.
+	if liveBody.Status != "ok" || liveBody.ReleaseID != release.ReleaseID ||
+		liveBody.ServiceVersion != release.ServiceVersion ||
+		liveBody.ConfigurationRevision != "release-under-proof" ||
+		liveBody.ReleaseID == liveBody.ConfigurationRevision ||
+		!integrationUUIDV7.MatchString(liveBody.RequestID) ||
+		liveBody.CorrelationID != liveBody.RequestID ||
+		liveResponse.Header.Get("X-Request-ID") != liveBody.RequestID ||
+		liveResponse.Header.Get("X-Correlation-ID") != liveBody.RequestID {
+		t.Fatalf("liveness body or headers = (%+v, %v)", liveBody, liveResponse.Header)
 	}
 	for _, oldPath := range []string{"/live", "/ready"} {
 		response, requestErr := enabledServer.Client().Get(enabledServer.URL + oldPath)

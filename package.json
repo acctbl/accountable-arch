@@ -21,6 +21,7 @@
     "oxlint-tsgolint": "7.0.2001"
   },
   "dependencies": {
-    "valibot": "catalog:"
+    "valibot": "catalog:",
+    "web-vitals": "catalog:"
   }
 }

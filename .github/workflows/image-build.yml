@@ -77,5 +77,17 @@ jobs:
             echo "ECR returned an invalid image digest" >&2
             exit 1
           fi
-          echo "### Development image" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`$IMAGE_REPOSITORY@$digest\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "IMAGE_DIGEST=$digest" >>"$GITHUB_ENV"
+
+      # A release only names artifacts that carry their own signature, so the
+      # digest is signed here and the signature is proved before publication.
+      - name: Sign and verify the image digest
+        run: |
+          set -euo pipefail
+          mise exec -- cosign sign --yes "$IMAGE_REPOSITORY@$IMAGE_DIGEST"
+          mise exec -- cosign verify \
+            --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/image-build.yml@refs/heads/main" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE_REPOSITORY@$IMAGE_DIGEST" >/dev/null
+          echo "### Development image" >>"$GITHUB_STEP_SUMMARY"
+          echo "\`$IMAGE_REPOSITORY@$IMAGE_DIGEST\`" >>"$GITHUB_STEP_SUMMARY"

@@ -15,8 +15,14 @@ locals {
 
   api_port      = 8080
   database_port = 5432
-  data_bucket   = "${local.name}-${var.account_id}-data"
-  web_bucket    = "${local.name}-${var.account_id}-web"
+
+  scratch_path                 = "/run/accountable"
+  collector_application_port   = 4318
+  collector_sli_port           = 4319
+  collector_grafana_token_file = "/run/accountable/grafana-token"
+  collector_config_file        = "/run/accountable/collector.yaml"
+  data_bucket                  = "${local.name}-${var.account_id}-data"
+  web_bucket                   = "${local.name}-${var.account_id}-web"
 
   parameter_root = "/accountable/${var.cell_id}/${var.environment}"
   parameter_arn_prefix = join("", [

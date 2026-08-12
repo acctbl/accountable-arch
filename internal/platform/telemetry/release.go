@@ -14,10 +14,11 @@ var releaseArtifactTypes = map[string]string{
 }
 
 type ReleaseArtifact struct {
-	Name         string `json:"name"`
-	Type         string `json:"type"`
-	Digest       string `json:"digest"`
-	ImmutableURI string `json:"immutable_uri"`
+	Name          string `json:"name"`
+	Type          string `json:"type"`
+	Digest        string `json:"digest"`
+	ArchiveDigest string `json:"archive_digest,omitempty"`
+	ImmutableURI  string `json:"immutable_uri"`
 }
 
 type ReleaseManifest struct {
@@ -38,8 +39,11 @@ type VerifyReleaseInput struct {
 	BundleJSON             []byte
 	ExpectedManifestDigest string
 	ExpectedBundleDigest   string
-	ArtifactBytes          map[string][]byte
-	Policy                 ReleaseTrustPolicy
+	// ArtifactDigests are the digests the deployment observed for each registered
+	// artifact name: an OCI manifest digest for an image and the canonical file-set
+	// digest for web assets.
+	ArtifactDigests map[string]string
+	Policy          ReleaseTrustPolicy
 }
 
 func ParseReleaseManifest(raw []byte) (ReleaseManifest, error) {
@@ -54,7 +58,7 @@ func ParseReleaseManifest(raw []byte) (ReleaseManifest, error) {
 }
 
 func ValidateReleaseManifest(manifest ReleaseManifest) error {
-	if manifest.SchemaVersion != ContractSchemaVersion || !releaseIDPattern.MatchString(manifest.ReleaseID) ||
+	if manifest.SchemaVersion != ContractSchemaVersion || !uuidV7Pattern.MatchString(manifest.ReleaseID) ||
 		!validWholeSecondUTC(manifest.CreatedAt) || !commitSHAPattern.MatchString(manifest.CommitSHA) ||
 		len(manifest.Artifacts) != len(releaseArtifactTypes) {
 		return contractError("release manifest")
@@ -74,6 +78,13 @@ func ValidateReleaseManifest(manifest ReleaseManifest) error {
 		seen[artifact.Name] = struct{}{}
 		if artifact.Type == "oci_image" && !bytes.Contains([]byte(artifact.ImmutableURI), []byte("@"+artifact.Digest)) {
 			return contractError("OCI artifact URI")
+		}
+		if artifact.Type == "oci_image" && artifact.ArchiveDigest != "" {
+			return contractError("OCI archive digest")
+		}
+		if artifact.Name == "web_assets" && (!digestPattern.MatchString(artifact.ArchiveDigest) ||
+			!bytes.Contains([]byte(artifact.ImmutableURI), []byte(artifact.ArchiveDigest))) {
+			return contractError("web archive digest")
 		}
 		if artifact.Name == "api_oci" {
 			apiDigest = artifact.Digest
@@ -126,12 +137,12 @@ func VerifyRelease(ctx context.Context, input VerifyReleaseInput, verifier BlobS
 	if err := verifier.VerifyBlob(ctx, canonical, input.BundleJSON, input.Policy); err != nil {
 		return err
 	}
-	if len(input.ArtifactBytes) != len(manifest.Artifacts) {
+	if len(input.ArtifactDigests) != len(manifest.Artifacts) {
 		return contractError("release artifacts")
 	}
 	for _, artifact := range manifest.Artifacts {
-		raw, ok := input.ArtifactBytes[artifact.Name]
-		if !ok || "sha256:"+sha256Hex(raw) != artifact.Digest {
+		observed, ok := input.ArtifactDigests[artifact.Name]
+		if !ok || observed != artifact.Digest {
 			return contractError("release artifact digest")
 		}
 	}

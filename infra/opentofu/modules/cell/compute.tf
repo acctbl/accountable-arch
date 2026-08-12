@@ -60,6 +60,19 @@ resource "aws_ecs_cluster" "cell" {
     name  = "containerInsights"
     value = "enabled"
   }
+
+  configuration {
+    managed_storage_configuration {
+      fargate_ephemeral_storage_kms_key_id = aws_kms_key.cell.arn
+    }
+  }
+
+  lifecycle {
+    postcondition {
+      condition     = self.configuration[0].managed_storage_configuration[0].fargate_ephemeral_storage_kms_key_id == aws_kms_key.cell.arn
+      error_message = "Fargate ephemeral storage must use the cell customer-managed KMS key."
+    }
+  }
 }
 
 resource "aws_cloudwatch_log_group" "runtime" {
@@ -77,14 +90,41 @@ locals {
     }
   }
 
+  scratch_volume_name = "runtime-scratch"
+
+  # Release identity stays outside the configuration document so the configuration
+  # fingerprint never depends on a release value.
+  release_document = jsonencode({
+    schema_version          = 1
+    release_id              = var.release_id
+    release_manifest_digest = var.release_manifest_digest
+    service_version         = replace(var.image_uri, "/^[^@]+@/", "")
+    web_asset_digest        = var.web_asset_digest
+  })
+
+  release_environment = {
+    name  = "ACCOUNTABLE_RELEASE_BASE64"
+    value = base64encode(local.release_document)
+  }
+
+  # Fargate does not support linuxParameters.tmpfs, so the runtime scratch is one
+  # task-scoped bind volume encrypted by the cluster managed-storage KMS key.
   runtime_scratch = {
-    linuxParameters = {
-      tmpfs = [{
-        containerPath = "/run/accountable"
-        mountOptions  = ["rw", "noexec", "nosuid", "nodev", "uid=65532", "gid=65532", "mode=0700"]
-        size          = 64
-      }]
-    }
+    mountPoints = [{
+      containerPath = local.scratch_path
+      readOnly      = false
+      sourceVolume  = local.scratch_volume_name
+    }]
+    stopTimeout = 30
+  }
+
+  collector_scratch_read_only = {
+    mountPoints = [{
+      containerPath = local.scratch_path
+      readOnly      = true
+      sourceVolume  = local.scratch_volume_name
+    }]
+    stopTimeout = 30
   }
 }
 
@@ -92,10 +132,13 @@ resource "aws_ecs_task_definition" "api" {
   container_definitions = jsonencode([merge(local.runtime_scratch, {
     command   = ["api"]
     essential = true
-    environment = [{
-      name  = "ACCOUNTABLE_CONFIG_BASE64"
-      value = base64encode(local.api_config)
-    }]
+    environment = [
+      {
+        name  = "ACCOUNTABLE_CONFIG_BASE64"
+        value = base64encode(local.api_config)
+      },
+      local.release_environment,
+    ]
     image            = var.image_uri
     logConfiguration = local.log_configuration
     name             = "api"
@@ -116,6 +159,10 @@ resource "aws_ecs_task_definition" "api" {
   requires_compatibilities = ["FARGATE"]
   task_role_arn            = aws_iam_role.api.arn
 
+  volume {
+    name = local.scratch_volume_name
+  }
+
   runtime_platform {
     cpu_architecture        = "ARM64"
     operating_system_family = "LINUX"
@@ -126,10 +173,13 @@ resource "aws_ecs_task_definition" "migrate" {
   container_definitions = jsonencode([merge(local.runtime_scratch, {
     command   = ["migrate"]
     essential = true
-    environment = [{
-      name  = "ACCOUNTABLE_CONFIG_BASE64"
-      value = base64encode(local.migrate_config)
-    }]
+    environment = [
+      {
+        name  = "ACCOUNTABLE_CONFIG_BASE64"
+        value = base64encode(local.migrate_config)
+      },
+      local.release_environment,
+    ]
     image                  = var.image_uri
     logConfiguration       = local.log_configuration
     name                   = "migrate"
@@ -143,6 +193,10 @@ resource "aws_ecs_task_definition" "migrate" {
   requires_compatibilities = ["FARGATE"]
   task_role_arn            = aws_iam_role.migrate.arn
 
+  volume {
+    name = local.scratch_volume_name
+  }
+
   runtime_platform {
     cpu_architecture        = "ARM64"
     operating_system_family = "LINUX"
@@ -153,10 +207,13 @@ resource "aws_ecs_task_definition" "preflight" {
   container_definitions = jsonencode([merge(local.runtime_scratch, {
     command   = ["preflight"]
     essential = true
-    environment = [{
-      name  = "ACCOUNTABLE_CONFIG_BASE64"
-      value = base64encode(local.preflight_config)
-    }]
+    environment = [
+      {
+        name  = "ACCOUNTABLE_CONFIG_BASE64"
+        value = base64encode(local.preflight_config)
+      },
+      local.release_environment,
+    ]
     image                  = var.image_uri
     logConfiguration       = local.log_configuration
     name                   = "preflight"
@@ -170,6 +227,10 @@ resource "aws_ecs_task_definition" "preflight" {
   requires_compatibilities = ["FARGATE"]
   task_role_arn            = aws_iam_role.api.arn
 
+  volume {
+    name = local.scratch_volume_name
+  }
+
   runtime_platform {
     cpu_architecture        = "ARM64"
     operating_system_family = "LINUX"
@@ -180,10 +241,13 @@ resource "aws_ecs_task_definition" "bootstrap" {
   container_definitions = jsonencode([merge(local.runtime_scratch, {
     command   = ["bootstrap"]
     essential = true
-    environment = [{
-      name  = "ACCOUNTABLE_CONFIG_BASE64"
-      value = base64encode(local.bootstrap_config)
-    }]
+    environment = [
+      {
+        name  = "ACCOUNTABLE_CONFIG_BASE64"
+        value = base64encode(local.bootstrap_config)
+      },
+      local.release_environment,
+    ]
     secrets = [{
       name      = "ACCOUNTABLE_DATABASE_MASTER_PASSWORD"
       valueFrom = "${aws_db_instance.cell.master_user_secret[0].secret_arn}:password::"
@@ -200,6 +264,10 @@ resource "aws_ecs_task_definition" "bootstrap" {
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   task_role_arn            = aws_iam_role.bootstrap.arn
+
+  volume {
+    name = local.scratch_volume_name
+  }
 
   runtime_platform {
     cpu_architecture        = "ARM64"

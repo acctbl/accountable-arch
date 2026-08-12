@@ -24,7 +24,7 @@ func main() {
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New(
-			"usage: release <produce|verify|web-manifest|verify-web|web-release|runtime-release> [flags]",
+			"usage: release <produce|verify|web-manifest|extract-web|verify-web|web-release|runtime-release> [flags]",
 		)
 	}
 	switch args[0] {
@@ -34,6 +34,8 @@ func run(ctx context.Context, args []string) error {
 		return verify(ctx, args[1:])
 	case "web-manifest":
 		return webManifest(args[1:])
+	case "extract-web":
+		return extractWeb(args[1:])
 	case "verify-web":
 		return verifyWeb(args[1:])
 	case "web-release":
@@ -43,6 +45,16 @@ func run(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown release command %q", args[0])
 	}
+}
+
+func extractWeb(args []string) error {
+	set := flag.NewFlagSet("extract-web", flag.ContinueOnError)
+	archive := set.String("archive", "", "verified web archive path")
+	root := set.String("root", "", "empty extraction directory")
+	if err := set.Parse(args); err != nil {
+		return err
+	}
+	return telemetry.ExtractWebArchive(*archive, *root)
 }
 
 // produce builds the canonical manifest for one release. The release identity is

@@ -136,6 +136,13 @@ plan_args=(
 	-var="api_desired_count=1"
 	-var="configuration_revision=negative-proof"
 	-var="image_uri=453722413624.dkr.ecr.eu-west-2.amazonaws.com/accountable@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	-var="collector_image_uri=453722413624.dkr.ecr.eu-west-2.amazonaws.com/accountable-collector@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	-var="grafana_otlp_endpoint=https://otlp-gateway-prod-gb-south-1.grafana.net/otlp"
+	-var="runbook_base_url=https://github.com/acctbl/accountable/tree/main/docs/runbooks"
+	-var="dashboard_base_url=https://acctbl.grafana.net"
+	-var="release_id=018f47d2-7f00-7abc-8def-1234567890ab"
+	-var="release_manifest_digest=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	-var="web_asset_digest=sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 )
 
 save_plan() {
@@ -203,5 +210,7 @@ prove world-open-ingress "$module_root" "security-group ingress is world-open"
 prove mutable-image "$module_root" "every task image must use a sha256 digest"
 prove malformed-image-digest "$module_root" "every task image must use a sha256 digest"
 prove missing-waf "$module_root" "CloudFront must have an AWS WAF web ACL"
+prove tmpfs-scratch "$module_root" "Fargate tasks must not use linuxParameters.tmpfs"
+prove host-path-scratch "$module_root" "every container mount must be the task-scoped runtime scratch volume"
 
 clear_mutation

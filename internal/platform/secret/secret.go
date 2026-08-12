@@ -16,6 +16,11 @@ type SecretSource interface {
 	ResolveBatch(context.Context, []Ref) (map[Ref]SecretValue, error)
 }
 
+type OptionalSecretSource interface {
+	SecretSource
+	ResolveOptional(context.Context, Ref) (SecretValue, bool, error)
+}
+
 type SecretValue struct{ bytes []byte }
 
 func NewSecretValue(value []byte) SecretValue {
@@ -57,6 +62,34 @@ func (r *FileSecretSource) ResolveBatch(ctx context.Context, refs []Ref) (map[Re
 		values[ref] = value
 	}
 	return values, nil
+}
+
+func (r *FileSecretSource) ResolveOptional(ctx context.Context, ref Ref) (SecretValue, bool, error) {
+	parsed, err := ParseRef(string(ref))
+	if err != nil {
+		return SecretValue{}, false, errors.New("secret reference is invalid")
+	}
+	path := filepath.Join(r.root, filepath.FromSlash(string(parsed)))
+	if !within(r.root, path) {
+		return SecretValue{}, false, errors.New("secret reference is invalid")
+	}
+	resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if os.IsNotExist(err) {
+		return SecretValue{}, false, nil
+	}
+	if err != nil || !within(r.root, resolvedParent) {
+		return SecretValue{}, false, errors.New("secret is unavailable")
+	}
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		return SecretValue{}, false, nil
+	} else if err != nil {
+		return SecretValue{}, false, errors.New("secret is unavailable")
+	}
+	value, err := r.resolve(ctx, parsed)
+	if err != nil {
+		return SecretValue{}, false, err
+	}
+	return value, true, nil
 }
 
 func (r *FileSecretSource) resolve(ctx context.Context, ref Ref) (SecretValue, error) {

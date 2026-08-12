@@ -8,6 +8,7 @@ import {
 	clientSampled,
 	DocumentEmissionLimits,
 	parseClientEnvelope,
+	validateClientAdmission,
 } from "./index";
 
 const fixtureRoot = resolve(
@@ -35,16 +36,63 @@ describe("client contract fixtures", () => {
 	});
 });
 
-test("sampling is deterministic", async () => {
-	const first = await clientSampled(
-		"018f47d2-7f00-7abc-8def-1234567890ab",
-		"app.ready",
-	);
-	const second = await clientSampled(
-		"018f47d2-7f00-7abc-8def-1234567890ab",
-		"app.ready",
-	);
-	expect(first).toBe(second);
+describe("shared parity vectors", () => {
+	const readVectors = async () =>
+		JSON.parse(
+			await readFile(resolve(fixtureRoot, "parity/vectors.json"), "utf8"),
+		) as {
+			sampling: {
+				correlation_id: string;
+				event_name: string;
+				sampled: boolean;
+			}[];
+			admission_window: {
+				now: string;
+				occurred_at: string;
+				admitted: boolean;
+			}[];
+		};
+
+	test("sampling matches the Go decision for every vector", async () => {
+		const { sampling } = await readVectors();
+		expect(sampling.length).toBeGreaterThan(0);
+		for (const vector of sampling) {
+			expect(
+				await clientSampled(vector.correlation_id, vector.event_name),
+			).toBe(vector.sampled);
+		}
+	});
+
+	test("admission window matches the Go decision for every vector", async () => {
+		const { admission_window } = await readVectors();
+		const envelope = parseClientEnvelope(
+			JSON.parse(
+				await readFile(resolve(fixtureRoot, "positive/app-ready.json"), "utf8"),
+			),
+		);
+		const activeIdentity = {
+			client_application: envelope.client_application,
+			release_id: envelope.release_id,
+			client_artifact_type: envelope.client_artifact_type,
+			client_artifact_digest: envelope.client_artifact_digest,
+			configuration_schema_version: envelope.configuration_schema_version,
+			configuration_revision: envelope.configuration_revision,
+			configuration_fingerprint: envelope.configuration_fingerprint,
+		};
+		expect(admission_window.length).toBeGreaterThan(0);
+		for (const vector of admission_window) {
+			const attempt = () =>
+				validateClientAdmission(
+					{ ...envelope, occurred_at: vector.occurred_at },
+					{ now: new Date(vector.now), activeIdentity },
+				);
+			if (vector.admitted) {
+				expect(attempt).not.toThrow();
+			} else {
+				expect(attempt).toThrow();
+			}
+		}
+	});
 });
 
 test("combined document limits share one counter", () => {

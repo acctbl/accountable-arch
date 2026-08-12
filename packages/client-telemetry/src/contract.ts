@@ -1,6 +1,6 @@
 import {
-	clientRegistry,
 	type ClientEnvelope,
+	clientRegistry,
 	parseClientEnvelopeSchema,
 } from "./generated/client-contract.schema";
 
@@ -196,4 +196,24 @@ function sameIdentity(
 			left[key as keyof ClientIdentityTuple] ===
 			right[key as keyof ClientIdentityTuple],
 	);
+}
+
+// newCorrelationId makes one UUIDv7 journey identity. The server accepts only a
+// canonical UUIDv7 in the public correlation header.
+export function newCorrelationId(): string {
+	const bytes = crypto.getRandomValues(new Uint8Array(16));
+	const milliseconds = BigInt(Date.now());
+	for (let index = 0; index < 6; index += 1) {
+		bytes[index] = Number((milliseconds >> BigInt(8 * (5 - index))) & 0xffn);
+	}
+	bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x70;
+	bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+	const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0"));
+	return [
+		hex.slice(0, 4).join(""),
+		hex.slice(4, 6).join(""),
+		hex.slice(6, 8).join(""),
+		hex.slice(8, 10).join(""),
+		hex.slice(10, 16).join(""),
+	].join("-");
 }

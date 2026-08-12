@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+case "${1:-}:${2:-}" in
+	lambda:invoke)
+		if [[ "${ACCOUNTABLE_TEST_CASE:-}" == "invoke-error" ]]; then
+			exit 1
+		fi
+		for argument in "$@"; do
+			if [[ "$argument" == */accountable-canary-response.* ]]; then
+				printf '{}\n' >"$argument"
+			fi
+		done
+		if [[ "${ACCOUNTABLE_TEST_CASE:-}" == "function-error" ]]; then
+			printf '{"StatusCode":200,"FunctionError":"Unhandled"}\n'
+		else
+			printf '{"StatusCode":200}\n'
+		fi
+		;;
+	cloudwatch:describe-alarms)
+		case "${ACCOUNTABLE_TEST_CASE:-}" in
+			critical)
+				printf '{"MetricAlarms":[{"AlarmDescription":"{\\"severity\\":\\"critical\\"}"}],"CompositeAlarms":[]}\n'
+				;;
+			warning)
+				printf '{"MetricAlarms":[{"AlarmDescription":"{\\"severity\\":\\"warning\\"}"}],"CompositeAlarms":[]}\n'
+				;;
+			malformed)
+				printf '{"MetricAlarms":[{"AlarmDescription":"not-json"}],"CompositeAlarms":[]}\n'
+				;;
+			*) printf '{"MetricAlarms":[],"CompositeAlarms":[]}\n' ;;
+		esac
+		;;
+	*)
+		echo "unexpected aws command: $*" >&2
+		exit 2
+		;;
+esac

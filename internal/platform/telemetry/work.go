@@ -30,7 +30,7 @@ func ValidateWorkIdentity(identity WorkIdentity) error {
 		identity.CausationID,
 	}
 	for _, value := range values {
-		if value != "" && !releaseIDPattern.MatchString(value) {
+		if value != "" && !uuidV7Pattern.MatchString(value) {
 			return contractError("work identity")
 		}
 	}

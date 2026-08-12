@@ -1,0 +1,232 @@
+{
+  "schema_version": 1,
+  "sampling": [
+    {
+      "correlation_id": "018f47d2-7f00-7abc-8def-1234567890ab",
+      "event_name": "app.ready",
+      "sampled": false
+    },
+    {
+      "correlation_id": "018f47d2-7f00-7abc-8def-1234567890ab",
+      "event_name": "app.error",
+      "sampled": true
+    },
+    {
+      "correlation_id": "018f47d2-7f00-7abc-8def-1234567890ab",
+      "event_name": "route.navigation",
+      "sampled": false
+    },
+    {
+      "correlation_id": "018f47d2-7f00-7abc-8def-1234567890ab",
+      "event_name": "api.request.completed",
+      "sampled": true
+    },
+    {
+      "correlation_id": "018f47d2-7f00-7abc-8def-1234567890ab",
+      "event_name": "api.request.failed",
+      "sampled": true
+    },
+    {
+      "correlation_id": "018f47d2-7f00-7abc-8def-1234567890ab",
+      "event_name": "web_vital.lcp",
+      "sampled": false
+    },
+    {
+      "correlation_id": "018f47d2-7f00-7abc-8def-1234567890ab",
+      "event_name": "web_vital.inp",
+      "sampled": false
+    },
+    {
+      "correlation_id": "018f47d2-7f00-7abc-8def-1234567890ab",
+      "event_name": "web_vital.cls",
+      "sampled": false
+    },
+    {
+      "correlation_id": "019261bb-4c10-7f3a-9aaa-0f1e2d3c4b5a",
+      "event_name": "app.ready",
+      "sampled": true
+    },
+    {
+      "correlation_id": "019261bb-4c10-7f3a-9aaa-0f1e2d3c4b5a",
+      "event_name": "app.error",
+      "sampled": true
+    },
+    {
+      "correlation_id": "019261bb-4c10-7f3a-9aaa-0f1e2d3c4b5a",
+      "event_name": "route.navigation",
+      "sampled": true
+    },
+    {
+      "correlation_id": "019261bb-4c10-7f3a-9aaa-0f1e2d3c4b5a",
+      "event_name": "api.request.completed",
+      "sampled": false
+    },
+    {
+      "correlation_id": "019261bb-4c10-7f3a-9aaa-0f1e2d3c4b5a",
+      "event_name": "api.request.failed",
+      "sampled": true
+    },
+    {
+      "correlation_id": "019261bb-4c10-7f3a-9aaa-0f1e2d3c4b5a",
+      "event_name": "web_vital.lcp",
+      "sampled": true
+    },
+    {
+      "correlation_id": "019261bb-4c10-7f3a-9aaa-0f1e2d3c4b5a",
+      "event_name": "web_vital.inp",
+      "sampled": false
+    },
+    {
+      "correlation_id": "019261bb-4c10-7f3a-9aaa-0f1e2d3c4b5a",
+      "event_name": "web_vital.cls",
+      "sampled": false
+    },
+    {
+      "correlation_id": "01923f00-0000-7000-8000-000000000001",
+      "event_name": "app.ready",
+      "sampled": false
+    },
+    {
+      "correlation_id": "01923f00-0000-7000-8000-000000000001",
+      "event_name": "app.error",
+      "sampled": true
+    },
+    {
+      "correlation_id": "01923f00-0000-7000-8000-000000000001",
+      "event_name": "route.navigation",
+      "sampled": true
+    },
+    {
+      "correlation_id": "01923f00-0000-7000-8000-000000000001",
+      "event_name": "api.request.completed",
+      "sampled": false
+    },
+    {
+      "correlation_id": "01923f00-0000-7000-8000-000000000001",
+      "event_name": "api.request.failed",
+      "sampled": true
+    },
+    {
+      "correlation_id": "01923f00-0000-7000-8000-000000000001",
+      "event_name": "web_vital.lcp",
+      "sampled": false
+    },
+    {
+      "correlation_id": "01923f00-0000-7000-8000-000000000001",
+      "event_name": "web_vital.inp",
+      "sampled": false
+    },
+    {
+      "correlation_id": "01923f00-0000-7000-8000-000000000001",
+      "event_name": "web_vital.cls",
+      "sampled": false
+    },
+    {
+      "correlation_id": "0192ffff-ffff-7fff-bfff-ffffffffffff",
+      "event_name": "app.ready",
+      "sampled": false
+    },
+    {
+      "correlation_id": "0192ffff-ffff-7fff-bfff-ffffffffffff",
+      "event_name": "app.error",
+      "sampled": true
+    },
+    {
+      "correlation_id": "0192ffff-ffff-7fff-bfff-ffffffffffff",
+      "event_name": "route.navigation",
+      "sampled": false
+    },
+    {
+      "correlation_id": "0192ffff-ffff-7fff-bfff-ffffffffffff",
+      "event_name": "api.request.completed",
+      "sampled": false
+    },
+    {
+      "correlation_id": "0192ffff-ffff-7fff-bfff-ffffffffffff",
+      "event_name": "api.request.failed",
+      "sampled": true
+    },
+    {
+      "correlation_id": "0192ffff-ffff-7fff-bfff-ffffffffffff",
+      "event_name": "web_vital.lcp",
+      "sampled": false
+    },
+    {
+      "correlation_id": "0192ffff-ffff-7fff-bfff-ffffffffffff",
+      "event_name": "web_vital.inp",
+      "sampled": false
+    },
+    {
+      "correlation_id": "0192ffff-ffff-7fff-bfff-ffffffffffff",
+      "event_name": "web_vital.cls",
+      "sampled": false
+    },
+    {
+      "correlation_id": "01920000-1111-7222-8333-444455556666",
+      "event_name": "app.ready",
+      "sampled": false
+    },
+    {
+      "correlation_id": "01920000-1111-7222-8333-444455556666",
+      "event_name": "app.error",
+      "sampled": true
+    },
+    {
+      "correlation_id": "01920000-1111-7222-8333-444455556666",
+      "event_name": "route.navigation",
+      "sampled": true
+    },
+    {
+      "correlation_id": "01920000-1111-7222-8333-444455556666",
+      "event_name": "api.request.completed",
+      "sampled": false
+    },
+    {
+      "correlation_id": "01920000-1111-7222-8333-444455556666",
+      "event_name": "api.request.failed",
+      "sampled": true
+    },
+    {
+      "correlation_id": "01920000-1111-7222-8333-444455556666",
+      "event_name": "web_vital.lcp",
+      "sampled": false
+    },
+    {
+      "correlation_id": "01920000-1111-7222-8333-444455556666",
+      "event_name": "web_vital.inp",
+      "sampled": false
+    },
+    {
+      "correlation_id": "01920000-1111-7222-8333-444455556666",
+      "event_name": "web_vital.cls",
+      "sampled": false
+    }
+  ],
+  "admission_window": [
+    {
+      "now": "2026-08-10T10:00:00.000Z",
+      "occurred_at": "2026-08-10T10:00:00.000Z",
+      "admitted": true
+    },
+    {
+      "now": "2026-08-10T10:00:00.000Z",
+      "occurred_at": "2026-08-10T09:55:00.000Z",
+      "admitted": true
+    },
+    {
+      "now": "2026-08-10T10:00:00.000Z",
+      "occurred_at": "2026-08-10T09:54:59.999Z",
+      "admitted": false
+    },
+    {
+      "now": "2026-08-10T10:00:00.000Z",
+      "occurred_at": "2026-08-10T10:01:00.000Z",
+      "admitted": true
+    },
+    {
+      "now": "2026-08-10T10:00:00.000Z",
+      "occurred_at": "2026-08-10T10:01:00.001Z",
+      "admitted": false
+    }
+  ]
+}

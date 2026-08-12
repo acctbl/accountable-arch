@@ -7,6 +7,7 @@ import (
 	"github.com/acctbl/accountable/internal/platform/database"
 	"github.com/acctbl/accountable/internal/platform/secret"
 	"github.com/acctbl/accountable/internal/platform/storage"
+	"github.com/acctbl/accountable/internal/platform/telemetry"
 )
 
 func TestParseRejectsNonUTCDatabaseTimezone(t *testing.T) {
@@ -95,12 +96,13 @@ func TestParseRefusesCapabilityContradictions(t *testing.T) {
 	t.Parallel()
 
 	for name, mutate := range map[string]func(*FileConfig){
-		"missing explicit value":          func(raw *FileConfig) { raw.Capabilities.KMS = nil },
-		"section present while false":     func(raw *FileConfig) { raw.Capabilities.KMS = boolPointer(false) },
-		"section absent while true":       func(raw *FileConfig) { raw.KMS = nil },
-		"telemetry before implementation": func(raw *FileConfig) { raw.Capabilities.Telemetry = boolPointer(true) },
-		"redpanda before implementation":  func(raw *FileConfig) { raw.Capabilities.Redpanda = boolPointer(true) },
-		"production architecture probe":   func(raw *FileConfig) { raw.Capabilities.ArchitectureProbe = boolPointer(true) },
+		"missing explicit value":              func(raw *FileConfig) { raw.Capabilities.KMS = nil },
+		"section present while false":         func(raw *FileConfig) { raw.Capabilities.KMS = boolPointer(false) },
+		"section absent while true":           func(raw *FileConfig) { raw.KMS = nil },
+		"telemetry section absent while true": func(raw *FileConfig) { raw.Telemetry = nil },
+		"telemetry disabled while managed":    func(raw *FileConfig) { raw.Capabilities.Telemetry = boolPointer(false) },
+		"redpanda before implementation":      func(raw *FileConfig) { raw.Capabilities.Redpanda = boolPointer(true) },
+		"production architecture probe":       func(raw *FileConfig) { raw.Capabilities.ArchitectureProbe = boolPointer(true) },
 	} {
 		raw := managedFileConfig()
 		mutate(&raw)
@@ -131,7 +133,8 @@ func managedFileConfig() FileConfig {
 		SchemaVersion: 1, Revision: "reviewed-1", Environment: "production",
 		DeploymentMode: DeploymentModeManaged, CellID: "cell-a",
 		AWSRegion: "eu-west-2", RuntimeRole: RuntimeRoleAPI, CheckTimeout: "30s", ReadinessProbeInterval: "10s",
-		Capabilities: completeCapabilities(false),
+		Capabilities: managedCapabilities(false),
+		Telemetry:    managedTelemetry(),
 		Secrets: &SecretsFileConfig{
 			Provider: secret.ProviderParameterStore, AWSRegion: "eu-west-2",
 			ParameterPath: "/accountable/cell-a/production/api",
@@ -178,9 +181,27 @@ func developmentFileConfig() FileConfig {
 }
 
 func completeCapabilities(architectureProbe bool) CapabilitiesFileConfig {
+	return capabilitiesWithTelemetry(architectureProbe, false)
+}
+
+func managedCapabilities(architectureProbe bool) CapabilitiesFileConfig {
+	return capabilitiesWithTelemetry(architectureProbe, true)
+}
+
+func capabilitiesWithTelemetry(architectureProbe, telemetryEnabled bool) CapabilitiesFileConfig {
 	return CapabilitiesFileConfig{
 		ArchitectureProbe: boolPointer(architectureProbe), Postgres: boolPointer(true), Secrets: boolPointer(true),
-		KMS: boolPointer(true), ObjectStorage: boolPointer(true), Telemetry: boolPointer(false), Redpanda: boolPointer(false),
+		KMS: boolPointer(true), ObjectStorage: boolPointer(true),
+		Telemetry: boolPointer(telemetryEnabled), Redpanda: boolPointer(false),
+	}
+}
+
+func managedTelemetry() *TelemetryFileConfig {
+	return &TelemetryFileConfig{
+		CollectorEndpoint:      "http://collector.development-01.accountable.internal:4318",
+		Protocol:               telemetry.TelemetryProtocol,
+		SamplingPolicy:         telemetry.TelemetrySamplingPolicy,
+		RedactionPolicyVersion: telemetry.TelemetryRedactionPolicy,
 	}
 }
 

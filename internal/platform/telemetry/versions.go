@@ -15,3 +15,16 @@ const (
 	TelemetryRedactionPolicy    = "allowlist_v1"
 	GitHubActionsOIDCIssuer     = "https://token.actions.githubusercontent.com"
 )
+
+const (
+	// GrafanaStackSlug is the immutable slug of the one shared stack. It is the
+	// identity that appears in the stack URL and in every stack-scoped alert.
+	GrafanaStackSlug = "acctbl"
+)
+
+const (
+	ScratchDirectory         = "/run/accountable"
+	CollectorApplicationPort = 4318
+	CollectorSLIPort         = 4319
+	CollectorInternalPort    = 8888
+)

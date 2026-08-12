@@ -37,7 +37,7 @@ func ParseProofFixture(raw []byte) (ProofHeaders, error) {
 		return ProofHeaders{}, err
 	}
 	if !proofTimestampPattern.MatchString(headers.Timestamp) ||
-		!releaseIDPattern.MatchString(headers.Nonce) ||
+		!uuidV7Pattern.MatchString(headers.Nonce) ||
 		!proofSignaturePattern.MatchString(headers.Signature) {
 		return ProofHeaders{}, contractError("proof headers")
 	}
@@ -74,7 +74,7 @@ func VerifyProof(input ProofVerification) error {
 		return contractError("proof body")
 	}
 	if !proofTimestampPattern.MatchString(input.Headers.Timestamp) ||
-		!releaseIDPattern.MatchString(input.Headers.Nonce) ||
+		!uuidV7Pattern.MatchString(input.Headers.Nonce) ||
 		!proofSignaturePattern.MatchString(input.Headers.Signature) {
 		return contractError("proof headers")
 	}

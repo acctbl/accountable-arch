@@ -56,14 +56,27 @@ module "cell" {
     aws.global = aws.global
   }
 
-  account_id             = "453722413624"
-  api_desired_count      = var.api_desired_count
-  availability_zones     = ["eu-west-2a", "eu-west-2b"]
-  cell_id                = "development-01"
-  configuration_revision = var.configuration_revision
-  cell_lifecycle         = "ephemeral"
-  environment            = "development"
-  image_repository_arn   = "arn:aws:ecr:eu-west-2:453722413624:repository/accountable"
-  image_uri              = var.image_uri
-  vpc_cidr               = "10.20.0.0/16"
+  account_id                     = "453722413624"
+  alarm_input_topic_arn          = "arn:aws:sns:eu-west-2:453722413624:accountable-development-observability-alarm-input"
+  runbook_base_url               = var.runbook_base_url
+  dashboard_base_url             = var.dashboard_base_url
+  api_desired_count              = var.api_desired_count
+  availability_zones             = ["eu-west-2a", "eu-west-2b"]
+  cell_id                        = "development-01"
+  cell_lifecycle                 = "ephemeral"
+  collector_desired_count        = var.collector_desired_count
+  collector_image_repository_arn = "arn:aws:ecr:eu-west-2:453722413624:repository/accountable-collector"
+  collector_image_uri            = var.collector_image_uri
+  collector_otlp_token_ref       = var.collector_otlp_token_ref
+  configuration_revision         = var.configuration_revision
+  environment                    = "development"
+  grafana_instance_id            = "1765140"
+  grafana_otlp_endpoint          = var.grafana_otlp_endpoint
+  image_repository_arn           = "arn:aws:ecr:eu-west-2:453722413624:repository/accountable"
+  image_uri                      = var.image_uri
+  release_id                     = var.release_id
+  release_manifest_digest        = var.release_manifest_digest
+  previous_web_identity          = var.previous_web_identity
+  web_asset_digest               = var.web_asset_digest
+  vpc_cidr                       = "10.20.0.0/16"
 }

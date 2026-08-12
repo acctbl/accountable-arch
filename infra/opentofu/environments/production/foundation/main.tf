@@ -32,11 +32,45 @@ provider "aws" {
   }
 }
 
+data "aws_iam_policy_document" "development_replication" {
+  statement {
+    actions = ["ecr:ReplicateImage"]
+    resources = [
+      "arn:aws:ecr:eu-west-2:576329195663:repository/accountable",
+      "arn:aws:ecr:eu-west-2:576329195663:repository/accountable-collector",
+      "arn:aws:ecr:eu-west-2:576329195663:repository/accountable-k6",
+    ]
+
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::453722413624:root"]
+    }
+  }
+}
+
+resource "aws_ecr_registry_policy" "development_replication" {
+  policy = data.aws_iam_policy_document.development_replication.json
+}
+
 module "environment" {
   source = "../../../modules/environment-foundation"
 
   account_id                 = "576329195663"
   environment                = "production"
   github_oidc_subject_prefix = "repo:acctbl@309473689/accountable@1318144297"
+  github_repository          = "acctbl/accountable"
   region                     = "eu-west-2"
+}
+
+resource "aws_ecr_repository" "collector" {
+  name                 = "accountable-collector"
+  image_tag_mutability = "IMMUTABLE"
+
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
 }

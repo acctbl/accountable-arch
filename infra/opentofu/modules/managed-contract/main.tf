@@ -1,8 +1,11 @@
 data "aws_caller_identity" "current" {}
 
 locals {
-  contract_role_name   = "accountable-${var.environment}-contract"
-  github_oidc_subject  = "${var.github_oidc_subject_prefix}:environment:${var.github_environment}"
+  contract_role_name = "accountable-${var.environment}-contract"
+  github_oidc_subjects = [
+    for workflow in ["ci.yml", "managed-contract.yml"] :
+    "${var.github_oidc_subject_prefix}:environment:${var.github_environment}:workflow_ref:${var.github_repository}/.github/workflows/${workflow}@refs/heads/main"
+  ]
   insecure_bucket_name = "accountable-${var.environment}-insecure-${var.account_id}-${var.region}"
   secure_bucket_name   = "accountable-${var.environment}-contract-${var.account_id}-${var.region}"
   contract_buckets = {
@@ -147,7 +150,7 @@ data "aws_iam_policy_document" "github_assume_role" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = [local.github_oidc_subject]
+      values   = local.github_oidc_subjects
     }
   }
 }

@@ -69,6 +69,9 @@ catalogs:
     vitest:
       specifier: ^4.1.10
       version: 4.1.10
+    web-vitals:
+      specifier: ^6.0.1
+      version: 6.0.1
 
 overrides:
   brace-expansion: 5.0.9
@@ -87,6 +90,9 @@ importers:
       valibot:
         specifier: 'catalog:'
         version: 1.4.2(typescript@7.0.2)
+      web-vitals:
+        specifier: 'catalog:'
+        version: 6.0.1
     devDependencies:
       '@axe-core/playwright':
         specifier: 4.11.1
@@ -106,6 +112,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@accountable/client-telemetry':
+        specifier: workspace:*
+        version: link:../../packages/client-telemetry
       '@accountable/proto':
         specifier: workspace:*
         version: link:../../packages/proto
@@ -148,6 +157,9 @@ importers:
       valibot:
         specifier: 'catalog:'
         version: 1.4.2(typescript@7.0.2)
+      web-vitals:
+        specifier: 'catalog:'
+        version: 6.0.1
     devDependencies:
       '@biomejs/biome':
         specifier: 'catalog:'
@@ -3043,6 +3055,9 @@ packages:
       jsdom:
         optional: true
 
+  web-vitals@6.0.1:
+    resolution: {integrity: sha512-iF3+kno3Anlqi5fPVTQk9gYLfsCiL8P69Hof+AmZyVVx00E3e/BiGVvu+EsOy6jvTLqTKuiaRloPyw0JtdKbSw==}
+
   webpack-virtual-modules@0.6.2:
     resolution: {integrity: sha512-66/V2i5hQanC51vBQKPH4aI8NMAcBW59FVBs+rC7eGHupMyfn34q7rZIE+ETlJ+XTevqfUhVVBgSUNSW2flEUQ==}
 
@@ -5516,6 +5531,8 @@ snapshots:
       happy-dom: 20.11.1
     transitivePeerDependencies:
       - msw
+
+  web-vitals@6.0.1: {}
 
   webpack-virtual-modules@0.6.2: {}
 

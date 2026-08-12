@@ -108,7 +108,7 @@ func TestFoundationFailClosedPostgresIntegration(t *testing.T) {
 
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := database.ExecContext(ctx, `DROP TABLE IF EXISTS goose_db_version, accountable_schema_state`); err != nil {
+			if _, err := database.ExecContext(ctx, `DROP TABLE IF EXISTS accountable_proof_nonces, goose_db_version, accountable_schema_state`); err != nil {
 				t.Fatalf("reset database: %v", err)
 			}
 			if err := migration.Run(ctx, database); err != nil {

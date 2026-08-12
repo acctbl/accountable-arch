@@ -82,3 +82,24 @@ func TestFileSecretSourceResolvesBatchAtomically(t *testing.T) {
 		t.Fatalf("duplicate batch = (%v, %v), want refusal", values, err)
 	}
 }
+
+func TestFileSecretSourceTreatsOnlyAMissingOptionalSecretAsAbsent(t *testing.T) {
+	t.Parallel()
+
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "standby"), []byte("standby-secret"), 0o600); err != nil {
+		t.Fatalf("write secret: %v", err)
+	}
+	resolver, err := NewFileSecretSource(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, present, err := resolver.ResolveOptional(context.Background(), "standby")
+	if err != nil || !present || string(value.Bytes()) != "standby-secret" {
+		t.Fatalf("present optional secret = %q, %t, %v", value.Bytes(), present, err)
+	}
+	_, present, err = resolver.ResolveOptional(context.Background(), "missing")
+	if err != nil || present {
+		t.Fatalf("missing optional secret = %t, %v", present, err)
+	}
+}

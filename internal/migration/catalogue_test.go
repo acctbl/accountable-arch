@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"bytes"
 	"io/fs"
 	"testing"
 	"testing/fstest"
@@ -11,6 +12,33 @@ func TestCommittedCatalogueMatchesFilenameContract(t *testing.T) {
 
 	if _, err := mergeSources(Catalogue()); err != nil {
 		t.Fatalf("committed migration catalogue: %v", err)
+	}
+}
+
+func TestCommittedCatalogueDoesNotDependOnManagedDatabaseRoles(t *testing.T) {
+	t.Parallel()
+
+	migrations, err := mergeSources(Catalogue())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = fs.WalkDir(migrations, ".", func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() {
+			return walkErr
+		}
+		payload, readErr := fs.ReadFile(migrations, path)
+		if readErr != nil {
+			return readErr
+		}
+		for _, role := range [][]byte{[]byte("accountable_admin"), []byte("accountable_api"), []byte("accountable_migrate")} {
+			if bytes.Contains(payload, role) {
+				t.Errorf("migration %s depends on managed database role %s", path, role)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -1,0 +1,55 @@
+name: GitHub OIDC contract
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: github-oidc-contract
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - environment: development
+            account: "453722413624"
+          - environment: staging
+            account: "723225039926"
+          - environment: production
+            account: "576329195663"
+    env:
+      AWS_REGION: eu-west-2
+      AWS_DEFAULT_REGION: eu-west-2
+      AWS_ROLE_ARN: arn:aws:iam::${{ matrix.account }}:role/accountable-${{ matrix.environment }}-plan
+    steps:
+      - name: Request and verify the exact immutable subject
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const token = await core.getIDToken("sts.amazonaws.com");
+            const claims = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8"));
+            const expected = "repo:acctbl@309473689/accountable@1318144297:ref:refs/heads/main:workflow_ref:acctbl/accountable/.github/workflows/oidc-contract.yml@refs/heads/main";
+            if (claims.sub !== expected) {
+              core.setFailed(`unexpected OIDC subject: ${claims.sub}`);
+              return;
+            }
+            const tokenPath = path.join(process.env.RUNNER_TEMP, "aws-oidc-contract-token");
+            fs.writeFileSync(tokenPath, token, { mode: 0o600 });
+            core.exportVariable("AWS_WEB_IDENTITY_TOKEN_FILE", tokenPath);
+
+      - name: Prove the exact account role accepts only the verified subject
+        run: |
+          set -euo pipefail
+          identity="$(aws sts get-caller-identity --output json)"
+          jq -e --arg account "${{ matrix.account }}" '.Account == $account' <<<"$identity" >/dev/null

@@ -11,6 +11,7 @@ import (
 
 	"github.com/acctbl/accountable/internal/bootstrap"
 	"github.com/acctbl/accountable/internal/platform/database"
+	"github.com/acctbl/accountable/internal/platform/telemetry"
 )
 
 type stubDependencies struct{ unavailable atomic.Int32 }
@@ -31,8 +32,10 @@ func TestBootstrapFailureNeverStartsServing(t *testing.T) {
 	err := bootstrapAndServe(
 		context.Background(),
 		config{},
+		testRelease(),
+		&runtimeSignals{},
 		func(context.Context, bootstrap.Config) (ownedDependencySet, error) { return nil, want },
-		func(context.Context, config, dependencySet) error {
+		func(context.Context, config, telemetry.RuntimeRelease, *runtimeSignals, dependencySet) error {
 			serveCalled = true
 			return nil
 		},
@@ -67,7 +70,7 @@ func TestRunningAPIDropsAndRecoversReadinessWithoutExiting(t *testing.T) {
 				HealthCheckInterval: 5 * time.Millisecond,
 				ConnectTimeout:      50 * time.Millisecond,
 			}, CheckTimeout: 50 * time.Millisecond, ReadinessProbeInterval: 5 * time.Millisecond},
-		}, dependencies)
+		}, testRelease(), &runtimeSignals{}, dependencies)
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -107,4 +110,14 @@ func assertReadinessStatus(t *testing.T, address string, want int) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("/_health/ready did not reach status %d", want)
+}
+
+func testRelease() telemetry.RuntimeRelease {
+	return telemetry.RuntimeRelease{
+		SchemaVersion:         1,
+		ReleaseID:             "018f47d2-7f00-7abc-8def-1234567890ab",
+		ReleaseManifestDigest: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+		ServiceVersion:        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+		WebAssetDigest:        "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+	}
 }
