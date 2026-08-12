@@ -12,7 +12,7 @@ expected="$(mktemp "${TMPDIR:-/tmp}/accountable-runbooks-expected.XXXXXX")"
 actual="$(mktemp "${TMPDIR:-/tmp}/accountable-runbooks-actual.XXXXXX")"
 trap 'rm -f "$expected" "$actual"' EXIT
 
-rg -o '\$\{var\.runbook_base_url\}/[a-z-]+' "${terraform_paths[@]}" |
+grep -Eho '\$\{var\.runbook_base_url\}/[a-z-]+' "${terraform_paths[@]}" |
 	sed 's#.*\${var\.runbook_base_url}/##' |
 	sort -u >"$expected"
 
@@ -28,6 +28,6 @@ fi
 while IFS= read -r runbook; do
 	path="$runbook_root/$runbook/README.md"
 	for heading in Diagnosis Mitigation Recovery Escalation; do
-		rg -F "## $heading" "$path" >/dev/null
+		grep -F "## $heading" "$path" >/dev/null
 	done
 done <"$expected"

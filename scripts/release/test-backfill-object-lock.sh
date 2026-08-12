@@ -13,7 +13,7 @@ ACCOUNTABLE_RELEASE_ACCOUNT_ID="453722413624" \
 PATH="$temporary:$PATH" \
 	bash scripts/release/backfill-object-lock.sh
 
-rg -F 'Mode=COMPLIANCE,RetainUntilDate=2027-01-02T03:04:05Z' "$log" >/dev/null
+grep -F 'Mode=COMPLIANCE,RetainUntilDate=2027-01-02T03:04:05Z' "$log" >/dev/null
 
 : >"$log"
 ACCOUNTABLE_FAKE_AWS_LOG="$log" \
