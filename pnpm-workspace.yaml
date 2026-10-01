@@ -12,26 +12,26 @@ minimumReleaseAgeExclude:
 trustPolicy: no-downgrade
 
 catalog:
-  "@biomejs/biome": 2.5.5
+  "@biomejs/biome": 2.5.14
   "@fontsource-variable/inter": ^5.3.0
   "@fontsource-variable/noto-sans-arabic": ^5.3.0
-  "@formatjs/intl-localematcher": ^0.8.13
+  "@formatjs/intl-localematcher": ^0.9.0
   "@phosphor-icons/react": ^2.1.10
   "@tailwindcss/vite": ^4.3.3
-  "@tanstack/react-router": ^1.170.18
-  "@types/node": ^26.1.0
-  "@types/react": ^19.2.0
-  "@types/react-dom": ^19.2.0
-  "@vitejs/plugin-react": ^6.0.1
-  react: ^19.2.0
-  react-dom: ^19.2.0
-  react-intl: ^10.1.18
+  "@tanstack/react-router": ^1.170.38
+  "@types/node": ^26.6.1
+  "@types/react": ^19.3.0
+  "@types/react-dom": ^19.3.0
+  "@vitejs/plugin-react": ^6.1.1
+  react: ^19.3.0
+  react-dom: ^19.3.0
+  react-intl: ^10.2.2
   tailwindcss: ^4.3.3
-  "@testing-library/react": ^16.3.2
-  happy-dom: ^20.11.1
+  "@testing-library/react": ^16.3.3
+  happy-dom: ^20.14.5
   typescript: 7.0.2
-  vite: ^8.1.5
-  vitest: ^4.1.10
+  vite: ^8.3.0
+  vitest: ^4.1.11
 
 overrides:
   brace-expansion: 5.0.9
